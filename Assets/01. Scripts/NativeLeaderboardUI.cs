@@ -33,11 +33,15 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
     private Rect lastSafeArea;
     private bool lastKeyboardVisible;
     private Text titleText;
+    private Text kickerText;
+    private Text nicknameLabel;
     private Text headingText;
     private Text localBestText;
     private Text runText;
     private Text statusText;
     private Text rowsText;
+    private Canvas uiCanvas;
+    private float pointToCanvas = 1f;
     private bool suppressEndEdit;
     private ContentSizeFitter rowsFitter;
     private InputField nicknameInput;
@@ -45,6 +49,13 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
     private Button cancelButton;
     private Button closeButton;
     private Font font;
+    private float RowHeight = 34f;
+    private const float RowHeightPoints = 34f;
+    private const float RowHeightCompactPoints = 29f;
+    private static readonly float[] ColumnEdges = new float[] { 0f, 0.17f, 0.62f, 0.79f, 1f };
+    private static readonly string[] HeaderLabels = new string[] { "순위", "닉네임", "코인", "시간" };
+    private Text[] headerCells;
+    private readonly System.Collections.Generic.List<GameObject> rowObjects = new System.Collections.Generic.List<GameObject>();
     private bool pausedGame;
     private string nicknameBeforeEdit = string.Empty;
     private int lastScreenW;
@@ -151,10 +162,32 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         instance.Build(canvas);
     }
 
+    private static float CurrentDensity()
+    {
+#if UNITY_EDITOR
+        return 1f;
+#else
+        float dpi = Screen.dpi;
+        if (dpi <= 0f) return 1f;
+        return Mathf.Clamp(Mathf.Round(dpi / 160f), 1f, 4f);
+#endif
+    }
+
+    private static float PointsToCanvasUnits(Canvas canvas, float density)
+    {
+        float s = canvas != null && canvas.scaleFactor > 0f ? canvas.scaleFactor : 1f;
+        if (s <= 0f) s = 1f;
+        return Mathf.Max(0.01f, density / s);
+    }
+
     private void Build(Canvas canvas)
     {
+        uiCanvas = canvas;
+        pointToCanvas = PointsToCanvasUnits(canvas, CurrentDensity());
+        Font rankingFont = Resources.Load<Font>("ZineRankingFont");
         Text sceneText = FindObjectOfType<Text>();
-        font = sceneText != null && sceneText.font != null
+        font = rankingFont != null ? rankingFont
+            : sceneText != null && sceneText.font != null
             ? sceneText.font
             : Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
 
@@ -167,12 +200,12 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         rootSafeRect = rootSafe.GetComponent<RectTransform>();
         ApplySafeArea(rootSafeRect);
 
-        openButton = MakeButton(rootSafe.transform, "🏆 랭킹", new Color(0.07f, 0.17f, 0.10f, 0.96f), Open);
+        openButton = MakeButton(rootSafe.transform, "랭킹", new Color(0.07f, 0.17f, 0.10f, 0.96f), Open, false);
         SetRect(openButton.GetComponent<RectTransform>(), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
             new Vector2(0f, 24f), new Vector2(230f, 82f), new Vector2(0.5f, 0f));
         openButton.interactable = requestedEnabled;
 
-        modal = MakePanel(root, "LeaderboardModal", new Color(0.01f, 0.035f, 0.02f, 0.94f));
+        modal = MakePanel(root, "LeaderboardModal", new Color(1f / 255f, 7f / 255f, 4f / 255f, 0.78f));
         Stretch(modal.GetComponent<RectTransform>());
 
         // Safe-area container so notches / home indicators never cover the card.
@@ -185,48 +218,36 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         SetRect(card, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
             Vector2.zero, new Vector2(1180f, 900f), new Vector2(0.5f, 0.5f));
 
-        Text title = MakeText(card.transform, "ZINE 3D · 명예의 전당", 48, TextAnchor.MiddleLeft, Color.white);
-        titleText = title;
-        SetRect(title.rectTransform, new Vector2(0f, 1f), new Vector2(1f, 1f),
-            new Vector2(45f, -42f), new Vector2(-170f, 80f), new Vector2(0f, 1f));
-
-        closeButton = MakeButton(card.transform, "닫기 ✕", new Color(0.18f, 0.25f, 0.20f, 1f), Close);
-        SetRect(closeButton.GetComponent<RectTransform>(), new Vector2(1f, 1f), new Vector2(1f, 1f),
-            new Vector2(-34f, -30f), new Vector2(150f, 70f), new Vector2(1f, 1f));
-
-        runText = MakeText(card.transform, string.Empty, 30, TextAnchor.MiddleLeft, new Color(0.75f, 1f, 0.55f));
-        SetRect(runText.rectTransform, new Vector2(0f, 1f), new Vector2(1f, 1f),
-            new Vector2(45f, -132f), new Vector2(-90f, 54f), new Vector2(0f, 1f));
-
-        localBestText = MakeText(card.transform, string.Empty, 27, TextAnchor.MiddleLeft, new Color(0.80f, 0.90f, 0.82f));
-        SetRect(localBestText.rectTransform, new Vector2(0f, 1f), new Vector2(1f, 1f),
-            new Vector2(45f, -190f), new Vector2(-90f, 50f), new Vector2(0f, 1f));
-
+        Color body = new Color(239f / 255f, 1f, 232f / 255f);
+        Color muted = new Color(body.r, body.g, body.b, 0.68f);
+        Color lime = new Color(184f / 255f, 1f, 87f / 255f);
+        kickerText = MakeText(card.transform, "ZINE3D", 11, TextAnchor.MiddleLeft, lime);
+        kickerText.fontStyle = FontStyle.Bold;
+        titleText = MakeText(card.transform, "명예의 전당", 26, TextAnchor.MiddleLeft, body);
+        titleText.fontStyle = FontStyle.Bold;
+        titleText.verticalOverflow = VerticalWrapMode.Overflow;
+        closeButton = MakeButton(card.transform, "×", Color.clear, Close, true, 26);
+        runText = MakeText(card.transform, string.Empty, 12, TextAnchor.MiddleLeft, new Color(1f, 0.98f, 0.82f));
+        localBestText = MakeText(card.transform, string.Empty, 11, TextAnchor.MiddleLeft, muted);
+        nicknameLabel = MakeText(card.transform, "내 닉네임", 12, TextAnchor.MiddleLeft, muted);
         nicknameInput = MakeInput(card.transform);
-        SetRect(nicknameInput.GetComponent<RectTransform>(), new Vector2(0f, 1f), new Vector2(1f, 1f),
-            new Vector2(45f, -254f), new Vector2(-560f, 66f), new Vector2(0f, 1f));
         nicknameInput.text = ZineLeaderboardClient.Nickname;
         nicknameBeforeEdit = nicknameInput.text;
         nicknameInput.onEndEdit.AddListener(OnNicknameEndEdit);
+        saveButton = MakeButton(card.transform, "저장", lime, SaveNickname, true, 13,
+            new Color(19f / 255f, 32f / 255f, 7f / 255f), true);
+        StyleWebPanel(saveButton.gameObject, lime, Color.clear, 11f);
+        cancelButton = MakeButton(card.transform, "취소", Color.clear, CancelNicknameEdit, true, 12);
+        statusText = MakeText(card.transform, string.Empty, 12, TextAnchor.MiddleLeft, muted);
+        headingText = MakeText(card.transform, string.Empty, 11, TextAnchor.MiddleLeft,
+            new Color(body.r, body.g, body.b, 0.56f));
+        GameObject headingBackground = new GameObject("HeaderBackground", typeof(RectTransform), typeof(Image));
+        headingBackground.transform.SetParent(headingText.transform, false);
+        Stretch(headingBackground.GetComponent<RectTransform>());
+        headingBackground.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.18f);
+        headingBackground.GetComponent<Image>().raycastTarget = false;
 
-        saveButton = MakeButton(card.transform, "닉네임 등록", new Color(0.34f, 0.58f, 0.13f, 1f), SaveNickname);
-        SetRect(saveButton.GetComponent<RectTransform>(), new Vector2(1f, 1f), new Vector2(1f, 1f),
-            new Vector2(-300f, -254f), new Vector2(235f, 66f), new Vector2(1f, 1f));
-
-        cancelButton = MakeButton(card.transform, "취소", new Color(0.22f, 0.28f, 0.24f, 1f), CancelNicknameEdit);
-        SetRect(cancelButton.GetComponent<RectTransform>(), new Vector2(1f, 1f), new Vector2(1f, 1f),
-            new Vector2(-45f, -254f), new Vector2(180f, 66f), new Vector2(1f, 1f));
-
-        statusText = MakeText(card.transform, string.Empty, 24, TextAnchor.MiddleLeft, new Color(1f, 0.82f, 0.45f));
-        SetRect(statusText.rectTransform, new Vector2(0f, 1f), new Vector2(1f, 1f),
-            new Vector2(45f, -328f), new Vector2(-90f, 48f), new Vector2(0f, 1f));
-
-        headingText = MakeText(card.transform, "순위      닉네임      코인      시간", 25,
-            TextAnchor.MiddleLeft, new Color(0.65f, 0.75f, 0.68f));
-        SetRect(headingText.rectTransform, new Vector2(0f, 1f), new Vector2(1f, 1f),
-            new Vector2(45f, -388f), new Vector2(-90f, 48f), new Vector2(0f, 1f));
-
-        // Scrollable rank list: all 10 rows reachable on small landscape screens.
+        // Scrollable rank list: all returned rows reachable on small landscape screens.
         GameObject scrollGo = new GameObject("RowsScroll", typeof(RectTransform), typeof(Image), typeof(ScrollRect), typeof(Mask));
         scrollGo.transform.SetParent(card.transform, false);
         Image scrollBg = scrollGo.GetComponent<Image>();
@@ -266,8 +287,8 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         scroll.scrollSensitivity = 28f;
 
         participationText = MakeText(card.transform,
-            "닉네임 등록을 누르면 닉네임과 최고 코인·시간이 공개 랭킹에 등록됩니다. 오프라인 플레이도 항상 가능합니다.",
-            23, TextAnchor.MiddleLeft, new Color(0.80f, 0.90f, 0.82f));
+            "저장하면 닉네임과 최고 코인·시간이 공개됩니다. 오프라인 플레이도 가능합니다.",
+            11, TextAnchor.MiddleLeft, new Color(0.80f, 0.90f, 0.82f));
         privacyButton = MakeButton(card.transform, "개인정보 처리방침", new Color(0.18f, 0.25f, 0.20f),
             () => Application.OpenURL("https://ghtnql.github.io/Zine3D/privacy-policy.html"));
         deleteButton = MakeButton(card.transform, "랭킹 등록 삭제", new Color(0.35f, 0.15f, 0.13f), RequestDeletion);
@@ -358,17 +379,77 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         RectTransform root = GetComponent<RectTransform>();
         float availW = root.rect.width * (safeAreaRect.anchorMax.x - safeAreaRect.anchorMin.x);
         float availH = root.rect.height * (safeAreaRect.anchorMax.y - safeAreaRect.anchorMin.y);
-        float margin = Mathf.Min(24f, availH * 0.04f);
-        float cardW = Mathf.Min(1180f, availW - margin * 2f);
-        float cardH = Mathf.Min(keyboardOpen ? 290f : 900f, availH - margin * 2f);
-        card.sizeDelta = new Vector2(cardW, cardH);
-        float scale = Mathf.Min(1f, cardW / 1180f, cardH / (keyboardOpen ? 290f : 900f));
-        float pad = 32f * scale;
+        pointToCanvas = PointsToCanvasUnits(uiCanvas, CurrentDensity());
+        float unit = pointToCanvas;
+        float logicalH = availH / unit;
+        bool compact = logicalH < 520f || keyboardOpen;
+        float padX = compact ? 16f : 20f;
+        float padY = compact ? 13f : 20f;
+        float width = Mathf.Max(1f, Mathf.Min(620f, availW / unit * 0.94f));
+        float height = Mathf.Max(1f, Mathf.Min(keyboardOpen ? 172f : gameOverShown ? 640f : 608f,
+            Mathf.Min(720f, logicalH * 0.92f)));
+        card.sizeDelta = new Vector2(width * unit, height * unit);
+        float innerW = Mathf.Max(1f, width - padX * 2f);
+        RowHeight = (compact ? RowHeightCompactPoints : RowHeightPoints) * unit;
 
-        titleText.fontSize = Mathf.Max(16, Mathf.RoundToInt((keyboardOpen ? 32f : 42f) * scale));
-        Place(titleText.rectTransform, pad, 20f * scale, cardW - pad * 2f - 160f * scale, 56f * scale);
-        Place(closeButton.GetComponent<RectTransform>(), cardW - pad - 145f * scale, 20f * scale, 145f * scale, 56f * scale);
+        // Dimensions are logical points, mapped once to Canvas units. Short screens
+        // scroll the table rather than shrinking body text and touch controls.
+        foreach (ZineWebPanel panel in card.GetComponentsInChildren<ZineWebPanel>(true))
+        {
+            panel.Radius = (panel.gameObject == card.gameObject ? 22f : 11f) * unit;
+            panel.BorderWidth = unit;
+            panel.SetVerticesDirty();
+        }
+        SetFontPoints(kickerText, 11f);
+        SetFontPoints(titleText, compact ? 20f : 26f);
+        SetFontPoints(nicknameLabel, 12f);
+        SetFontPoints(runText, 12f);
+        SetFontPoints(localBestText, 11f);
+        SetFontPoints(statusText, 12f);
+        SetFontPoints(headingText, 11f);
+        SetFontPoints(rowsText, 13f);
+        SetFontPoints(participationText, 11f);
+        SetButtonFontPoints(closeButton, 26f);
+        SetButtonFontPoints(saveButton, 13f);
+        SetButtonFontPoints(cancelButton, 12f);
+        SetButtonFontPoints(privacyButton, 11f);
+        SetButtonFontPoints(deleteButton, 11f);
+        foreach (Text text in nicknameInput.GetComponentsInChildren<Text>(true)) SetFontPoints(text, 15f);
+        foreach (Text text in deletionConfirmation.GetComponentsInChildren<Text>(true))
+            SetFontPoints(text, text.transform.parent == deletionConfirmation.transform ? 15f : 13f);
+        foreach (Text text in nicknameInput.GetComponentsInChildren<Text>(true))
+        {
+            text.rectTransform.offsetMin = new Vector2(12f * unit, 0f);
+            text.rectTransform.offsetMax = new Vector2(-12f * unit, 0f);
+        }
+
+        bool showKicker = !keyboardOpen || height >= 150f;
+        kickerText.gameObject.SetActive(showKicker);
+        PlacePoints(kickerText.rectTransform, padX, padY, innerW - 54f, 14f);
+        PlacePoints(titleText.rectTransform, padX, padY + (showKicker ? 16f : 0f), innerW - 54f, compact ? 26f : 32f);
+        PlacePoints(closeButton.GetComponent<RectTransform>(), width - padX - 38f, padY, 38f, 38f);
+        float top = padY + (keyboardOpen && !showKicker ? 30f : compact ? 44f : 50f) + (compact ? 8f : 14f);
         runText.gameObject.SetActive(!keyboardOpen && gameOverShown);
+        if (!keyboardOpen && gameOverShown)
+        {
+            PlacePoints(runText.rectTransform, padX, top, innerW, 24f);
+            top += 32f;
+        }
+        nicknameLabel.gameObject.SetActive(!compact);
+        if (!compact)
+        {
+            PlacePoints(nicknameLabel.rectTransform, padX, top, innerW, 16f);
+            top += 22f;
+        }
+        float saveW = 64f;
+        float cancelW = 52f;
+        float inputW = Mathf.Max(1f, innerW - saveW - cancelW - 16f);
+        PlacePoints(nicknameInput.GetComponent<RectTransform>(), padX, top, inputW, 42f);
+        PlacePoints(saveButton.GetComponent<RectTransform>(), padX + inputW + 8f, top, saveW, 42f);
+        PlacePoints(cancelButton.GetComponent<RectTransform>(), padX + inputW + saveW + 16f, top, cancelW, 42f);
+        top += 42f + (compact ? 5f : 8f);
+        PlacePoints(statusText.rectTransform, padX, top, innerW, 20f);
+        top += 20f + (compact ? 5f : 8f);
         localBestText.gameObject.SetActive(!keyboardOpen);
         headingText.gameObject.SetActive(!keyboardOpen);
         rowsScrollRect.gameObject.SetActive(!keyboardOpen);
@@ -376,36 +457,40 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         privacyButton.gameObject.SetActive(!keyboardOpen);
         deleteButton.gameObject.SetActive(!keyboardOpen);
         deleteButton.interactable = ZineLeaderboardClient.HasPlayer;
-        if (keyboardOpen)
+        if (!keyboardOpen)
         {
-            Place(nicknameInput.GetComponent<RectTransform>(), pad, 88f * scale, cardW - pad * 2f, 58f * scale);
-            float buttonW = (cardW - pad * 2f - 16f * scale) * 0.5f;
-            Place(saveButton.GetComponent<RectTransform>(), pad, 162f * scale, buttonW, 58f * scale);
-            Place(cancelButton.GetComponent<RectTransform>(), pad + buttonW + 16f * scale, 162f * scale, buttonW, 58f * scale);
-            Place(statusText.rectTransform, pad, 232f * scale, cardW - pad * 2f, 40f * scale);
+            float footerHeight = compact ? 85f : 94f;
+            float footerTop = height - padY - footerHeight;
+            PlacePoints(headingText.rectTransform, padX, top, innerW, compact ? 26f : 30f);
+            top += compact ? 26f : 30f;
+            PlacePoints(rowsScrollRect, padX, top, innerW, Mathf.Max(1f, footerTop - top - 8f));
+            PlacePoints(localBestText.rectTransform, padX, footerTop, innerW, 18f);
+            PlacePoints(participationText.rectTransform, padX, footerTop + 20f, innerW, compact ? 28f : 36f);
+            float footerButtonTop = height - padY - 30f;
+            float footerButtonW = (innerW - 8f) * 0.5f;
+            PlacePoints(privacyButton.GetComponent<RectTransform>(), padX, footerButtonTop, footerButtonW, 30f);
+            PlacePoints(deleteButton.GetComponent<RectTransform>(), padX + footerButtonW + 8f, footerButtonTop, footerButtonW, 30f);
         }
-        else
-        {
-            Place(runText.rectTransform, pad, 100f * scale, cardW - pad * 2f, 42f * scale);
-            Place(localBestText.rectTransform, pad, 150f * scale, cardW - pad * 2f, 44f * scale);
-            float inputW = cardW - pad * 2f - 440f * scale;
-            Place(nicknameInput.GetComponent<RectTransform>(), pad, 212f * scale, inputW, 64f * scale);
-            Place(saveButton.GetComponent<RectTransform>(), pad + inputW + 16f * scale, 212f * scale, 240f * scale, 64f * scale);
-            Place(cancelButton.GetComponent<RectTransform>(), cardW - pad - 168f * scale, 212f * scale, 168f * scale, 64f * scale);
-            Place(statusText.rectTransform, pad, 290f * scale, cardW - pad * 2f, 50f * scale);
-            Place(participationText.rectTransform, pad, 348f * scale, cardW - pad * 2f, 66f * scale);
-            Place(headingText.rectTransform, pad, 428f * scale, cardW - pad * 2f, 42f * scale);
-            Place(rowsScrollRect, pad, 482f * scale, cardW - pad * 2f, cardH - 578f * scale);
-            float footerW = (cardW - pad * 2f - 20f * scale) * 0.5f;
-            Place(privacyButton.GetComponent<RectTransform>(), pad, cardH - 78f * scale, footerW, 54f * scale);
-            Place(deleteButton.GetComponent<RectTransform>(), pad + footerW + 20f * scale, cardH - 78f * scale, footerW, 54f * scale);
-        }
-        foreach (Text text in card.GetComponentsInChildren<Text>(true))
-        {
-            if (text == titleText) continue;
-            text.fontSize = Mathf.Max(14, Mathf.RoundToInt((text == participationText ? 23f : text == rowsText ? 27f : 28f) * scale));
-        }
+        SetRect(openButton.GetComponent<RectTransform>(), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+            new Vector2(0f, 18f * unit), new Vector2(128f * unit, 42f * unit), new Vector2(0.5f, 0f));
+        SetButtonFontPoints(openButton, 15f);
         ResizeRows();
+    }
+
+    private void PlacePoints(RectTransform rect, float left, float top, float width, float height)
+    {
+        Place(rect, left * pointToCanvas, top * pointToCanvas,
+            Mathf.Max(1f, width) * pointToCanvas, Mathf.Max(1f, height) * pointToCanvas);
+    }
+
+    private void SetFontPoints(Text text, float points)
+    {
+        if (text != null) text.fontSize = Mathf.Max(1, Mathf.RoundToInt(points * pointToCanvas));
+    }
+
+    private void SetButtonFontPoints(Button button, float points)
+    {
+        SetFontPoints(button.GetComponentInChildren<Text>(true), points);
     }
 
     private static void Place(RectTransform rect, float left, float top, float width, float height)
@@ -414,10 +499,103 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
             new Vector2(width, height), new Vector2(0f, 1f));
     }
 
+    private void EnsureHeaderCells()
+    {
+        if (headingText == null || headerCells != null) return;
+        headingText.text = string.Empty;
+        headerCells = new Text[HeaderLabels.Length];
+        for (int i = 0; i < HeaderLabels.Length; i++)
+        {
+            Text cell = MakeText(headingText.transform, HeaderLabels[i], 11, TextAnchor.MiddleLeft,
+                new Color(239f / 255f, 1f, 232f / 255f, 0.56f));
+            cell.gameObject.name = "HeaderCell" + i;
+            cell.horizontalOverflow = HorizontalWrapMode.Wrap;
+            cell.verticalOverflow = VerticalWrapMode.Truncate;
+            SetColumnRect(cell.rectTransform, ColumnEdges[i], ColumnEdges[i + 1]);
+            headerCells[i] = cell;
+        }
+    }
+
+    private void SetColumnRect(RectTransform rect, float left, float right)
+    {
+        rect.anchorMin = new Vector2(left, 0f);
+        rect.anchorMax = new Vector2(right, 1f);
+        rect.pivot = new Vector2(0f, 0.5f);
+        rect.offsetMin = new Vector2(10f * pointToCanvas, 5f * pointToCanvas);
+        rect.offsetMax = new Vector2(-4f * pointToCanvas, -5f * pointToCanvas);
+    }
+
+    private Text MakeRowCell(Transform parent, string name, string value, Color color)
+    {
+        Text cell = MakeText(parent, value, 13, TextAnchor.MiddleLeft, color);
+        cell.gameObject.name = name;
+        cell.horizontalOverflow = HorizontalWrapMode.Wrap;
+        cell.verticalOverflow = VerticalWrapMode.Truncate;
+        return cell;
+    }
+
+    private void ClearRows()
+    {
+        rowObjects.Clear();
+        if (rowsContent == null) return;
+        for (int i = rowsContent.transform.childCount - 1; i >= 0; i--)
+        {
+            GameObject child = rowsContent.transform.GetChild(i).gameObject;
+            if (rowsText != null && child == rowsText.gameObject) continue;
+            child.SetActive(false);
+            Destroy(child);
+        }
+    }
+
+    private void ShowRowsStatus(string message)
+    {
+        ClearRows();
+        if (rowsText != null)
+        {
+            rowsText.gameObject.SetActive(true);
+            rowsText.text = message;
+        }
+    }
+
     private void ResizeRows()
     {
+        EnsureHeaderCells();
+        if (rowsContent == null || rowsScrollRect == null || rowsText == null) return;
+        if (headerCells != null && headingText != null)
+        {
+            for (int i = 0; i < headerCells.Length; i++)
+            {
+                if (headerCells[i] != null)
+                {
+                    headerCells[i].fontSize = headingText.fontSize;
+                    SetColumnRect(headerCells[i].rectTransform, ColumnEdges[i], ColumnEdges[i + 1]);
+                }
+            }
+        }
+        if (rowObjects.Count > 0)
+        {
+            float width = rowsScrollRect.rect.width;
+            for (int i = 0; i < rowObjects.Count; i++)
+            {
+                GameObject row = rowObjects[i];
+                if (row == null || !row.activeSelf) continue;
+                RectTransform rowRect = row.GetComponent<RectTransform>();
+                if (rowRect != null) Place(rowRect, 0f, i * RowHeight, width, RowHeight);
+                foreach (Text cell in row.GetComponentsInChildren<Text>(true))
+                {
+                    cell.fontSize = rowsText.fontSize;
+                    cell.fontStyle = cell.gameObject.name == "RankCell" ? FontStyle.Bold : FontStyle.Normal;
+                    int column = cell.gameObject.name == "RankCell" ? 0 : cell.gameObject.name == "NicknameCell" ? 1
+                        : cell.gameObject.name == "CoinCell" ? 2 : 3;
+                    SetColumnRect(cell.rectTransform, ColumnEdges[column], ColumnEdges[column + 1]);
+                }
+            }
+            float height = rowObjects.Count * RowHeight;
+            rowsContent.sizeDelta = new Vector2(0f, Mathf.Max(rowsScrollRect.rect.height, height));
+            return;
+        }
         LayoutRebuilder.ForceRebuildLayoutImmediate(rowsText.rectTransform);
-        rowsContent.sizeDelta = new Vector2(0f, Mathf.Max(rowsScrollRect.rect.height, rowsText.preferredHeight + 16f));
+        rowsContent.sizeDelta = new Vector2(0f, Mathf.Max(rowsScrollRect.rect.height, rowsText.preferredHeight + 16f * pointToCanvas));
     }
 
     private void Subscribe()
@@ -478,7 +656,7 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         statusText.text = Application.internetReachability == NetworkReachability.NotReachable
             ? "오프라인입니다. 로컬 최고기록은 기기에 저장됩니다."
             : "랭킹을 불러오는 중…";
-        rowsText.text = "랭킹을 불러오는 중…";
+        ShowRowsStatus("랭킹을 불러오는 중…");
         ResizeRows();
         rowsScrollRect.GetComponent<ScrollRect>().verticalNormalizedPosition = 1f;
         ZineLeaderboardClient.LoadLeaderboard(10);
@@ -597,7 +775,7 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         statusText.text = string.IsNullOrEmpty(message) ? "랭킹을 불러오지 못했습니다." : message;
         if (ZineLeaderboardClient.CurrentLeaderboard.Length == 0)
         {
-            rowsText.text = "랭킹을 불러오지 못했습니다.\n게임은 오프라인에서도 계속할 수 있습니다.";
+            ShowRowsStatus("랭킹을 불러오지 못했습니다.\n게임은 오프라인에서도 계속할 수 있습니다.");
             ResizeRows();
         }
     }
@@ -617,29 +795,55 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
             statusText.text = string.Empty;
         }
 
+        ClearRows();
+        EnsureHeaderCells();
+
         if (entries == null || entries.Length == 0)
         {
-            rowsText.text = "등록된 기록이 없습니다.";
+            ShowRowsStatus("첫 기록의 주인공이 되어보세요.");
             ResizeRows();
             return;
         }
 
-        StringBuilder builder = new StringBuilder();
+        if (rowsText != null)
+        {
+            rowsText.gameObject.SetActive(false);
+        }
+
+        Color rankColor = new Color(184f / 255f, 1f, 87f / 255f);
+        Color bodyColor = new Color(239f / 255f, 1f, 232f / 255f);
+        float width = rowsScrollRect != null ? rowsScrollRect.rect.width : 0f;
         int count = Mathf.Min(10, entries.Length);
         for (int i = 0; i < count; i++)
         {
             ZineLeaderboardEntry entry = entries[i];
-            string name = string.IsNullOrEmpty(entry.nickname) ? "-" : entry.nickname.Trim();
-            if (name.Length > 16) name = name.Substring(0, 16);
-            builder.Append(i + 1 <= 3 ? "★ " : "　 ");
-            builder.Append(entry.rank).Append("위  ").Append(name)
-                .Append("  ·  코인 ").Append(entry.body_count)
-                .Append("  ·  ").Append(FormatDuration(entry.survival_ms));
-            if (i < count - 1) builder.Append('\n');
+            GameObject row = new GameObject("RankRow" + entry.rank, typeof(RectTransform));
+            row.transform.SetParent(rowsContent.transform, false);
+            RectTransform rowRect = row.GetComponent<RectTransform>();
+            Place(rowRect, 0f, i * RowHeight, width, RowHeight);
+
+            Text rankCell = MakeRowCell(row.transform, "RankCell", "#" + entry.rank, rankColor);
+            SetColumnRect(rankCell.rectTransform, ColumnEdges[0], ColumnEdges[1]);
+            Text nicknameCell = MakeRowCell(row.transform, "NicknameCell", entry.nickname ?? string.Empty, bodyColor);
+            SetColumnRect(nicknameCell.rectTransform, ColumnEdges[1], ColumnEdges[2]);
+            Text coinCell = MakeRowCell(row.transform, "CoinCell", entry.body_count.ToString(), bodyColor);
+            SetColumnRect(coinCell.rectTransform, ColumnEdges[2], ColumnEdges[3]);
+            Text timeCell = MakeRowCell(row.transform, "TimeCell", FormatDuration(entry.survival_ms), bodyColor);
+            SetColumnRect(timeCell.rectTransform, ColumnEdges[3], ColumnEdges[4]);
+
+            GameObject divider = new GameObject("Divider", typeof(RectTransform), typeof(Image));
+            divider.transform.SetParent(row.transform, false);
+            divider.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0.09f);
+            RectTransform dividerRect = divider.GetComponent<RectTransform>();
+            dividerRect.anchorMin = new Vector2(0f, 0f);
+            dividerRect.anchorMax = new Vector2(1f, 0f);
+            dividerRect.pivot = new Vector2(0.5f, 0f);
+            dividerRect.anchoredPosition = Vector2.zero;
+            dividerRect.sizeDelta = new Vector2(0f, pointToCanvas);
+
+            rowObjects.Add(row);
         }
-        rowsText.text = builder.ToString();
         ResizeRows();
-        rowsContent.sizeDelta = new Vector2(0f, Mathf.Max(rowsScrollRect.rect.height, rowsText.preferredHeight + 16f));
         rowsScrollRect.GetComponent<ScrollRect>().verticalNormalizedPosition = 1f;
     }
 
@@ -664,10 +868,29 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
 
     private GameObject MakePanel(Transform parent, string name, Color color)
     {
-        GameObject panel = new GameObject(name, typeof(RectTransform), typeof(Image));
-        panel.transform.SetParent(parent, false);
-        panel.GetComponent<Image>().color = color;
-        return panel;
+        if (name == "Card")
+        {
+            GameObject panel = new GameObject(name, typeof(RectTransform), typeof(ZineWebPanel));
+            panel.transform.SetParent(parent, false);
+            ZineWebPanel web = panel.GetComponent<ZineWebPanel>();
+            web.SetStyle(new Color(0x14 / 255f, 0x24 / 255f, 0x17 / 255f, 1f),
+                new Color(0x05 / 255f, 0x0F / 255f, 0x09 / 255f, 1f),
+                new Color(184f / 255f, 1f, 87f / 255f, 0.3f), 22f, 1f);
+            return panel;
+        }
+        GameObject flat = new GameObject(name, typeof(RectTransform), typeof(Image));
+        flat.transform.SetParent(parent, false);
+        flat.GetComponent<Image>().color = color;
+        return flat;
+    }
+
+    private static void StyleWebPanel(GameObject go, Color fill, Color border, float radius)
+    {
+        ZineWebPanel web = go.GetComponent<ZineWebPanel>();
+        if (web != null)
+        {
+            web.SetStyle(fill, fill, border, radius, 1f);
+        }
     }
 
     private GameObject MakeTransparent(Transform parent, string name)
@@ -678,21 +901,36 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         return go;
     }
 
-    private Button MakeButton(Transform parent, string label, Color color, UnityEngine.Events.UnityAction action)
+    private Button MakeButton(Transform parent, string label, Color color, UnityEngine.Events.UnityAction action, bool rounded = true, int textSize = 30, Color textColor = default(Color), bool hasTextColor = false)
     {
-        GameObject go = MakePanel(parent, label + "Button", color);
+        GameObject go;
+        if (rounded)
+        {
+            go = new GameObject(label + "Button", typeof(RectTransform), typeof(ZineWebPanel));
+            go.transform.SetParent(parent, false);
+            StyleWebPanel(go, new Color(1f, 1f, 1f, 0.07f), new Color(1f, 1f, 1f, 0.2f), 11f);
+        }
+        else
+        {
+            go = MakePanel(parent, label + "Button", color);
+        }
         Button button = go.AddComponent<Button>();
-        button.targetGraphic = go.GetComponent<Image>();
+        button.targetGraphic = go.GetComponent<Graphic>();
         button.onClick.AddListener(action);
-        Text text = MakeText(go.transform, label, 30, TextAnchor.MiddleCenter, Color.white);
+        Text text = MakeText(go.transform, label, textSize, TextAnchor.MiddleCenter,
+            hasTextColor ? textColor : Color.white);
+        text.fontStyle = FontStyle.Bold;
         Stretch(text.rectTransform);
         return button;
     }
 
     private InputField MakeInput(Transform parent)
     {
-        GameObject go = MakePanel(parent, "NicknameInput", new Color(0.02f, 0.055f, 0.035f, 1f));
+        GameObject go = new GameObject("NicknameInput", typeof(RectTransform), typeof(ZineWebPanel));
+        go.transform.SetParent(parent, false);
+        StyleWebPanel(go, new Color(0f, 0f, 0f, 0.32f), new Color(1f, 1f, 1f, 0.2f), 11f);
         InputField input = go.AddComponent<InputField>();
+        input.targetGraphic = go.GetComponent<Graphic>();
         input.characterLimit = 16;
         input.lineType = InputField.LineType.SingleLine;
         input.keyboardType = TouchScreenKeyboardType.Default;
@@ -718,9 +956,11 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         Text text = go.GetComponent<Text>();
         text.font = font;
         text.fontSize = size;
+        text.fontStyle = FontStyle.Normal;
         text.alignment = alignment;
         text.color = color;
         text.text = value;
+        text.supportRichText = false;
         text.raycastTarget = false;
         return text;
     }

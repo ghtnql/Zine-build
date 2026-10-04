@@ -67,7 +67,9 @@ def main():
             raise RuntimeError("Apple API HTTP "+str(e.code)+": "+", ".join(x.get("code","")+" "+x.get("detail","") for x in body.get("errors",[]))) from None
     apps=api("apps?"+urllib.parse.urlencode({"filter[bundleId]":BUNDLE_ID,"limit":200}))["data"]
     app_id=apps[0]["id"] if apps else ""
-    build=1
+    project=Path("export/iOS/Info.plist")
+    pl=plistlib.loads(project.read_bytes())
+    build=max(1,int(pl["CFBundleVersion"]))
     if app_id:
         builds=api("builds?"+urllib.parse.urlencode({"filter[app]":app_id,"limit":200}))["data"]
         while True:
@@ -102,7 +104,7 @@ def main():
     assert info["Entitlements"]["application-identifier"]==os.environ["APPLE_TEAM_ID"]+"."+BUNDLE_ID
     assert not info["Entitlements"].get("get-task-allow",False)
     assert "ProvisionedDevices" not in info and "ProvisionsAllDevices" not in info
-    project=Path("export/iOS/Info.plist");pl=plistlib.loads(project.read_bytes());pl["CFBundleVersion"]=str(build);project.write_bytes(plistlib.dumps(pl))
+    pl["CFBundleVersion"]=str(build);project.write_bytes(plistlib.dumps(pl))
     options={"method":"app-store-connect","destination":"export","signingStyle":"manual","signingCertificate":"Apple Distribution","teamID":os.environ["APPLE_TEAM_ID"],"provisioningProfiles":{BUNDLE_ID:profile["attributes"]["uuid"]},"manageAppVersionAndBuildNumber":False,"stripSwiftSymbols":True,"uploadSymbols":True}
     Path(os.environ["RUNNER_TEMP"],"ZineExportOptions.plist").write_bytes(plistlib.dumps(options))
     with open(os.environ["GITHUB_ENV"],"a") as f:
