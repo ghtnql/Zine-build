@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#07130d">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Zine 3D">
+    <title>Zine 3D</title>
+    <link rel="icon" type="image/png" href="TemplateData/icon.png">
+    <link rel="apple-touch-icon" href="TemplateData/icon.png">
+    <link rel="stylesheet" href="TemplateData/style.css?v={{{ PRODUCT_VERSION }}}-ui-v4">
+    <link rel="manifest" href="manifest.webmanifest">
+  </head>
+  <body>
+    <main id="unity-container" aria-label="Zine 3D game">
+      <canvas id="unity-canvas" width={{{ WIDTH }}} height={{{ HEIGHT }}} tabindex="-1"></canvas>
+
+      <section id="unity-loading-bar" aria-live="polite">
+        <img id="zine-logo" src="TemplateData/icon.png" alt="Zine 3D">
+        <div id="unity-build-title">Zine 3D</div>
+        <div id="unity-progress-bar-empty">
+          <div id="unity-progress-bar-full"></div>
+        </div>
+        <div id="loading-label">게임을 불러오는 중…</div>
+      </section>
+
+      <button id="leaderboard-button" type="button" aria-label="랭킹 보기">🏆 랭킹</button>
+      <button id="fullscreen-button" type="button" aria-label="전체 화면">⛶</button>
+      <section id="leaderboard-modal" aria-hidden="true">
+        <button id="leaderboard-backdrop" type="button" aria-label="랭킹 닫기"></button>
+        <article id="leaderboard-card" role="dialog" aria-modal="true" aria-labelledby="leaderboard-title">
+          <header class="leaderboard-header">
+            <div>
+              <span class="leaderboard-kicker">ZINE 3D</span>
+              <h2 id="leaderboard-title">명예의 전당</h2>
+            </div>
+            <button id="leaderboard-close" type="button" aria-label="랭킹 닫기">×</button>
+          </header>
+
+          <div id="leaderboard-run" hidden></div>
+
+          <form id="nickname-form">
+            <label for="nickname-input">내 닉네임</label>
+            <div class="nickname-controls">
+              <input id="nickname-input" name="nickname" type="text" minlength="2" maxlength="16" autocomplete="nickname" placeholder="닉네임 2~16자" required>
+              <button id="nickname-save" type="submit">저장</button>
+            </div>
+          </form>
+
+          <p id="leaderboard-status" role="status"></p>
+
+          <div class="leaderboard-table-wrap">
+            <table class="leaderboard-table">
+              <thead><tr><th>순위</th><th>닉네임</th><th>코인</th><th>시간</th></tr></thead>
+              <tbody id="leaderboard-rows">
+                <tr><td colspan="4" class="leaderboard-empty">랭킹을 불러오는 중…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <div id="unity-warning"></div>
+    </main>
+
+    <section id="start-screen" aria-labelledby="start-title">
+      <img id="start-preview" src="TemplateData/start-screen.png" alt="노란 지네 캐릭터가 초록색 길 위에 서 있는 게임 화면">
+      <div id="start-panel">
+        <p id="start-kicker">ZINE 3D</p>
+        <h1 id="start-title">전체 화면으로 시작</h1>
+        <p id="start-description" hidden></p>
+        <button id="start-button" type="button" disabled>게임 준비 중…</button>
+      </div>
+    </section>
+
+    <script src="leaderboard-config.js"></script>
+    <script src="TemplateData/leaderboard.js?v={{{ PRODUCT_VERSION }}}-ui-v4"></script>
+    <script>
+      window.addEventListener("load", function () {
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.register("ServiceWorker.js?v={{{ PRODUCT_VERSION }}}-ui-v4");
+        }
+      });
+
+      var container = document.querySelector("#unity-container");
+      var canvas = document.querySelector("#unity-canvas");
+      var loadingBar = document.querySelector("#unity-loading-bar");
+      var progressBarFull = document.querySelector("#unity-progress-bar-full");
+      var warningBanner = document.querySelector("#unity-warning");
+      var fullscreenButton = document.querySelector("#fullscreen-button");
+      var startScreen = document.querySelector("#start-screen");
+      var startButton = document.querySelector("#start-button");
+      var startTitle = document.querySelector("#start-title");
+      var startDescription = document.querySelector("#start-description");
+      var isKakaoBrowser = /KAKAOTALK/i.test(navigator.userAgent);
+      var isStandalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+
+      var unityInstance = null;
+      var canFullscreen = document.fullscreenEnabled || typeof container.webkitRequestFullscreen === "function";
+
+      function markLandscapeFullscreenRequested() {
+        document.documentElement.classList.add("fullscreen-requested");
+        canvas.classList.add("is-landscape-fullscreen");
+        syncLandscapeFallback();
+        window.setTimeout(syncLandscapeFallback, 250);
+        window.setTimeout(syncLandscapeFallback, 800);
+      }
+
+      function syncLandscapeFallback() {
+        var viewportPortrait = window.innerHeight > window.innerWidth;
+        if (viewportPortrait) {
+          document.documentElement.classList.add("force-landscape");
+        } else {
+          document.documentElement.classList.remove("force-landscape");
+        }
+      }
+
+      function showKakaoUnsupported() {
+        document.documentElement.classList.add("kakao-browser");
+        startTitle.textContent = "카카오톡 브라우저에서는 실행할 수 없습니다";
+        startDescription.textContent = "오른쪽 위 메뉴에서 다른 브라우저로 열어주세요.";
+        startDescription.hidden = false;
+        startButton.hidden = true;
+        loadingBar.classList.remove("is-visible");
+      }
+
+      function requestGameFullscreen() {
+        markLandscapeFullscreenRequested();
+        var requestFullscreen = container.requestFullscreen || container.webkitRequestFullscreen;
+        if (typeof requestFullscreen === "function") {
+          try {
+            var fullscreenResult = requestFullscreen.call(container);
+            if (fullscreenResult && typeof fullscreenResult.catch === "function") {
+              fullscreenResult.catch(function () {
+                // 전체화면이 거부되면 CSS 가로 모드로 계속 실행합니다.
+              });
+            }
+          } catch (_error) {
+            // 전체화면이 거부되면 CSS 가로 모드로 계속 실행합니다.
+          }
+        }
+        lockLandscape();
+      }
+
+      function showStartError() {
+        startTitle.textContent = "게임을 불러오지 못했습니다";
+        startDescription.textContent = "네트워크 연결을 확인한 뒤 다시 시도해주세요.";
+        startDescription.hidden = false;
+        startButton.disabled = false;
+        startButton.textContent = "다시 불러오기";
+        startButton.dataset.action = "reload";
+      }
+
+      startButton.addEventListener("click", function () {
+        if (startButton.dataset.action === "reload") {
+          window.location.reload();
+          return;
+        }
+        if (!unityInstance) {
+          return;
+        }
+        startButton.disabled = true;
+        requestGameFullscreen();
+        startScreen.classList.add("is-hidden");
+        startScreen.setAttribute("aria-hidden", "true");
+        canvas.focus();
+        window.setTimeout(function () {
+          startScreen.remove();
+        }, 450);
+      });
+
+      function lockLandscape() {
+        if (screen.orientation && typeof screen.orientation.lock === "function") {
+          try {
+            var lockResult = screen.orientation.lock("landscape");
+            if (lockResult && typeof lockResult.catch === "function") {
+              lockResult.catch(function () {
+                // 일반 브라우저 탭에서는 잠금이 거부될 수 있으며 CSS 회전이 대신 처리합니다.
+              });
+            }
+          } catch (_error) {
+            // 일부 WebView는 동기적으로 거부하며 CSS 회전이 대신 처리합니다.
+          }
+        }
+      }
+
+      if (isStandalone) {
+        lockLandscape();
+      }
+
+      if (isKakaoBrowser) {
+        showKakaoUnsupported();
+      }
+
+      syncLandscapeFallback();
+      window.addEventListener("resize", syncLandscapeFallback);
+      window.addEventListener("orientationchange", syncLandscapeFallback);
+
+      document.addEventListener("fullscreenchange", function () {
+        syncLandscapeFallback();
+        if (document.fullscreenElement || document.webkitFullscreenElement) {
+          lockLandscape();
+        } else {
+          document.documentElement.classList.remove("fullscreen-requested");
+          canvas.classList.remove("is-landscape-fullscreen");
+        }
+      });
+
+      function unityShowBanner(message, type) {
+        var item = document.createElement("div");
+        item.textContent = message;
+        item.className = "warning-item " + (type || "");
+        warningBanner.appendChild(item);
+        warningBanner.classList.add("is-visible");
+
+        if (type !== "error") {
+          window.setTimeout(function () {
+            item.remove();
+            if (!warningBanner.children.length) {
+              warningBanner.classList.remove("is-visible");
+            }
+          }, 5000);
+        }
+      }
+
+      var buildUrl = "Build";
+      var loaderUrl = buildUrl + "/{{{ LOADER_FILENAME }}}";
+      var config = {
+        dataUrl: buildUrl + "/{{{ DATA_FILENAME }}}",
+        frameworkUrl: buildUrl + "/{{{ FRAMEWORK_FILENAME }}}",
+#if USE_THREADS
+        workerUrl: buildUrl + "/{{{ WORKER_FILENAME }}}",
+#endif
+#if USE_WASM
+        codeUrl: buildUrl + "/{{{ CODE_FILENAME }}}",
+#endif
+#if MEMORY_FILENAME
+        memoryUrl: buildUrl + "/{{{ MEMORY_FILENAME }}}",
+#endif
+#if SYMBOLS_FILENAME
+        symbolsUrl: buildUrl + "/{{{ SYMBOLS_FILENAME }}}",
+#endif
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: {{{ JSON.stringify(COMPANY_NAME) }}},
+        productName: {{{ JSON.stringify(PRODUCT_NAME) }}},
+        productVersion: {{{ JSON.stringify(PRODUCT_VERSION) }}},
+        autoSyncPersistentDataPath: true,
+        showBanner: unityShowBanner
+      };
+
+      if (window.matchMedia("(pointer: coarse)").matches) {
+        config.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+      }
+
+#if BACKGROUND_FILENAME
+      canvas.style.background = "url('" + buildUrl + "/{{{ BACKGROUND_FILENAME.replace(/'/g, '%27') }}}') center / cover";
+#endif
+      if (!isKakaoBrowser) {
+        loadingBar.classList.add("is-visible");
+
+        var script = document.createElement("script");
+        script.src = loaderUrl;
+        script.onload = function () {
+          createUnityInstance(canvas, config, function (progress) {
+            progressBarFull.style.width = (100 * progress) + "%";
+          }).then(function (instance) {
+          unityInstance = instance;
+          window.zineUnityInstance = instance;
+          loadingBar.classList.remove("is-visible");
+          startButton.disabled = false;
+          startButton.textContent = canFullscreen ? "전체 화면으로 시작" : "게임 시작";
+
+          if (canFullscreen) {
+            fullscreenButton.classList.add("is-visible");
+            fullscreenButton.addEventListener("click", function () {
+              requestGameFullscreen();
+            });
+          }
+          }).catch(function (message) {
+            unityShowBanner(message, "error");
+            showStartError();
+          });
+        };
+        script.onerror = function () {
+          unityShowBanner("게임 로더를 내려받지 못했습니다. 네트워크 연결을 확인해주세요.", "error");
+          showStartError();
+        };
+        document.body.appendChild(script);
+      }
+    </script>
+  </body>
+</html>

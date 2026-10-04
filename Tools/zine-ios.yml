@@ -1,0 +1,127 @@
+name: Zine signed iOS
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: Zine-build release tag containing zine-ios-export.tar.gz
+        required: true
+        type: string
+      export_sha256:
+        description: Expected SHA256 of export archive
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-26
+    environment: testflight
+    timeout-minutes: 50
+    env:
+      APPSTORE_ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+      APPSTORE_API_KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+    steps:
+      - name: Download and verify dedicated Zine export
+        env:
+          SOURCE_TAG: ${{ inputs.source_tag }}
+          EXPORT_SHA256: ${{ inputs.export_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_TAG" =~ ^ios-[a-zA-Z0-9.-]+$ ]]
+          [[ "$EXPORT_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          curl -fL --retry 3 "https://github.com/ghtnql/Zine-build/releases/download/$SOURCE_TAG/zine-ios-export.tar.gz" -o zine-ios-export.tar.gz
+          printf '%s  zine-ios-export.tar.gz\n' "$EXPORT_SHA256" | shasum -a 256 -c -
+          mkdir export
+          tar -xzf zine-ios-export.tar.gz -C export
+          test -f export/iOS/Unity-iPhone.xcodeproj/project.pbxproj
+          xcodebuild -version
+      - name: Prepare app-specific provisioning and version
+        env:
+          APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          IOS_APP_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_APP_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 export/Tools/zine-signing.py
+      - name: Import existing distribution certificate
+        env:
+          IOS_DISTRIBUTION_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}
+          IOS_DISTRIBUTION_P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          p12_path="$RUNNER_TEMP/zine-distribution.p12"
+          keychain_path="$RUNNER_TEMP/zine-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          printf '%s' "$IOS_DISTRIBUTION_P12_BASE64" | base64 --decode > "$p12_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$p12_path" -P "$IOS_DISTRIBUTION_P12_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain_path" >/dev/null
+          security list-keychains -d user -s "$keychain_path"
+          security find-identity -v -p codesigning "$keychain_path"
+          rm -f "$p12_path"
+      - name: Archive Unity game
+        working-directory: export/iOS
+        run: |
+          set -euo pipefail
+          xcodebuild -project Unity-iPhone.xcodeproj -scheme Unity-iPhone -configuration Release -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Zine.xcarchive" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_IDENTITY='Apple Distribution' CODE_SIGN_STYLE=Manual archive > "$RUNNER_TEMP/zine-archive.log" 2>&1 || { tail -n 100 "$RUNNER_TEMP/zine-archive.log"; exit 1; }
+          tail -n 8 "$RUNNER_TEMP/zine-archive.log"
+      - name: Export signed App Store IPA
+        run: |
+          set -euo pipefail
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Zine.xcarchive" -exportPath "$RUNNER_TEMP/zine-export" -exportOptionsPlist "$RUNNER_TEMP/ZineExportOptions.plist" > "$RUNNER_TEMP/zine-export.log" 2>&1 || { tail -n 80 "$RUNNER_TEMP/zine-export.log"; exit 1; }
+          ipa_path="$(find "$RUNNER_TEMP/zine-export" -maxdepth 1 -name '*.ipa' -print -quit)"
+          test -n "$ipa_path"
+          if [[ "$ipa_path" != "$RUNNER_TEMP/zine-export/Zine.ipa" ]]; then cp "$ipa_path" "$RUNNER_TEMP/zine-export/Zine.ipa"; fi
+          echo "IPA_PATH=$RUNNER_TEMP/zine-export/Zine.ipa" >> "$GITHUB_ENV"
+      - name: Verify signatures and actual IPA metadata
+        run: |
+          set -euo pipefail
+          ditto -x -k "$IPA_PATH" "$RUNNER_TEMP/zine-unpacked"
+          app="$(find "$RUNNER_TEMP/zine-unpacked/Payload" -maxdepth 1 -name '*.app' -print -quit)"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          security cms -D -i "$app/embedded.mobileprovision" > "$RUNNER_TEMP/zine-profile.plist"
+          python3 export/Tools/zine-verify-ipa.py "$app" "$IPA_PATH" "$RUNNER_TEMP/zine-profile.plist" "$RUNNER_TEMP/zine-export/manifest.json"
+      - name: Upload to TestFlight when app exists
+        if: env.ZINE_APP_ID != ''
+        uses: Apple-Actions/upload-testflight-build@1fc69ca369a60b813eaaa2d936eda22794b52e17
+        with:
+          app-path: ${{ env.IPA_PATH }}
+          issuer-id: ${{ env.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ env.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          uses-non-exempt-encryption: 'false'
+          wait-for-processing: 'false'
+      - name: Record upload state
+        run: |
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'zine-export'/'manifest.json'
+          data=json.loads(p.read_text());data['testFlightUploaded']=bool(os.environ.get('ZINE_APP_ID'));data['appRecordExists']=bool(os.environ.get('ZINE_APP_ID'));p.write_text(json.dumps(data,indent=2))
+          print(json.dumps(data,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zine-signed-ios
+          path: |
+            ${{ runner.temp }}/zine-export/Zine.ipa
+            ${{ runner.temp }}/zine-export/manifest.json
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: zine-ios-build-logs
+          path: |
+            ${{ runner.temp }}/zine-archive.log
+            ${{ runner.temp }}/zine-export.log
+      - name: Remove signing credentials
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/zine-distribution.p12" "$RUNNER_TEMP/zine-profile.plist"
+          if [[ -n "${ZINE_PROFILE_UUID:-}" ]]; then rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$ZINE_PROFILE_UUID.mobileprovision"; fi
+          security delete-keychain "$RUNNER_TEMP/zine-signing.keychain-db" 2>/dev/null || true
