@@ -75,7 +75,7 @@ def main():
             build=max([build-1]+nums)+1
             break
     ref=Path(os.environ["RUNNER_TEMP"])/"reference.mobileprovision"
-    ref.write_bytes(base64.b64decode("".join(os.environ["IOS_APP_PROVISIONING_PROFILE_BASE64"].split()),validate=True));ref.chmod(0o600)
+    ref.write_bytes(base64.b64decode(os.environ["IOS_APP_PROVISIONING_PROFILE_BASE64"],validate=True));ref.chmod(0o600)
     try:
         decoded=plistlib.loads(subprocess.run(["security","cms","-D","-i",str(ref)],capture_output=True,check=True).stdout)
     finally:ref.unlink(missing_ok=True)
