@@ -17,7 +17,7 @@ for raw in tracked:
  if '__pycache__' in relative.parts:continue
  assert (root/relative).is_file() and not (root/relative).is_symlink(),relative
  target=dest/relative;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(root/relative,target)
-(dest/'SOURCE.json').write_text(json.dumps({'sourceCommit':sha,'bundleId':'com.ghtnql.zine3d','originalRepository':'ghtnql/Zine','snapshotHasOriginalHistory':False},indent=2)+'\n')
-(dest/'README.md').write_text('# 지네 iOS build snapshot\n\nSanitized snapshot for `com.ghtnql.zine3d`. Original game history and Android signing material are excluded. Apple credentials stay in the existing private testflight environment. See `Tools/IOS-BUILD.md`.\n\nSource commit: `'+sha+'`\n')
+(dest/'SOURCE.json').write_text(json.dumps({'sourceCommit':sha,'bundleId':'com.HSV.Jine','originalRepository':'ghtnql/Zine','snapshotHasOriginalHistory':False},indent=2)+'\n')
+(dest/'README.md').write_text('# 지네 iOS build snapshot\n\nSanitized snapshot for `com.HSV.Jine`. Original game history and Android signing material are excluded. Apple credentials stay in the existing private testflight environment. See `Tools/IOS-BUILD.md`.\n\nSource commit: `'+sha+'`\n')
 assert not any(x.suffix.lower() in {'.keystore','.jks','.p12','.p8','.mobileprovision','.aab','.apk','.ipa'} for x in dest.rglob('*'))
 print(json.dumps({'destination':str(dest),'sourceCommit':sha,'files':sum(x.is_file() for x in dest.rglob('*'))}))

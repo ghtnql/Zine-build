@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -129,12 +129,12 @@ public class Snake : MonoBehaviour
     #region 세팅
     private void SetScore()
     {
-        txtCoin.text = "Coin : " + bodys.Count.ToString();
+        txtCoin.text = ZineLocale.T("코인 : ", "Coin : ") + bodys.Count.ToString();
         float t = Time.time - startTime;
         int h = Mathf.FloorToInt(t / 3600);
         int m = Mathf.FloorToInt(t % 3600 / 60);
         float s = t % 60;
-        if (!isDead) txtTime.text = string.Format("Time : {0:00}:{1:00}:{2:00.0}", h, m, s);
+        if (!isDead) txtTime.text = string.Format(ZineLocale.T("시간 : {0:00}:{1:00}:{2:00.0}", "Time : {0:00}:{1:00}:{2:00.0}"), h, m, s);
     }
 
     private float SetLevel()
@@ -142,18 +142,18 @@ public class Snake : MonoBehaviour
         float level = 1;
         if (bodys.Count >= 10 && bodys.Count < 15)
         {
-            txtNtc.text = "속도 1.1배!";
+            txtNtc.text = ZineLocale.T("속도 1.1배!", "Speed x1.1!");
             level = 1.1f;
             aSource.pitch = 1.05f;
         }
         else if (bodys.Count >= 15 && bodys.Count < 20)
         {
-            txtNtc.text = "속도 1.3배!";
+            txtNtc.text = ZineLocale.T("속도 1.3배!", "Speed x1.3!");
             level = 1.3f;
         }
         else if (bodys.Count >= 20)
         {
-            txtNtc.text = "속도 1.5배!";
+            txtNtc.text = ZineLocale.T("속도 1.5배!", "Speed x1.5!");
             level = 1.5f;
             aSource.pitch = 1.1f;
         }
@@ -161,7 +161,7 @@ public class Snake : MonoBehaviour
         float time = Time.time - startTime;
         if (time * 0.01f >= 1)
         {
-            txtNtc.text = "속도 무한증가!";
+            txtNtc.text = ZineLocale.T("속도 무한증가!", "Speed keeps increasing!");
             level *= time * 0.01f;
             aSource.pitch = 1.2f;
         }
@@ -202,6 +202,7 @@ public class Snake : MonoBehaviour
         int survivalMs = Mathf.Max(0, Mathf.RoundToInt((Time.time - startTime) * 1000f));
         ZineLeaderboardClient.RecordRun(bodys.Count, survivalMs);
         WebGLBridge.ShowLeaderboard(bodys.Count, survivalMs);
+        ADManager.ShowGameOverInterstitial();
     }
 
     public void PauseForLeaderboard()
@@ -340,6 +341,7 @@ public class Snake : MonoBehaviour
 #endif
         pnlBtn.gameObject.SetActive(isMobile);
         Screen.sleepTimeout = SleepTimeout.NeverSleep;
+        ZineLocale.ApplySceneLabels();
     }
     #endregion
 }

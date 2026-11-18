@@ -63,11 +63,20 @@ jobs:
           security list-keychains -d user -s "$keychain_path"
           security find-identity -v -p codesigning "$keychain_path"
           rm -f "$p12_path"
+      - name: Install iOS ad dependencies
+        working-directory: export/iOS
+        run: |
+          set -euo pipefail
+          test -f Podfile
+          sed -i '' "/github.com\/CocoaPods\/Specs/d" Podfile
+          pod install
+          test -f Unity-iPhone.xcworkspace/contents.xcworkspacedata
+
       - name: Archive Unity game
         working-directory: export/iOS
         run: |
           set -euo pipefail
-          xcodebuild -project Unity-iPhone.xcodeproj -scheme Unity-iPhone -configuration Release -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Zine.xcarchive" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_IDENTITY='Apple Distribution' CODE_SIGN_STYLE=Manual archive > "$RUNNER_TEMP/zine-archive.log" 2>&1 || { tail -n 100 "$RUNNER_TEMP/zine-archive.log"; exit 1; }
+          xcodebuild -workspace Unity-iPhone.xcworkspace -scheme Unity-iPhone -configuration Release -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Zine.xcarchive" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_IDENTITY='Apple Distribution' CODE_SIGN_STYLE=Manual archive > "$RUNNER_TEMP/zine-archive.log" 2>&1 || { tail -n 100 "$RUNNER_TEMP/zine-archive.log"; exit 1; }
           tail -n 8 "$RUNNER_TEMP/zine-archive.log"
       - name: Export signed App Store IPA
         run: |

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
@@ -9,7 +10,7 @@ using UnityEngine;
 
 public static class ZineIOSBuild
 {
-    public const string BundleId = "com.ghtnql.zine3d";
+    public const string BundleId = "com.HSV.Jine";
 
     public static void Export()
     {
@@ -19,6 +20,7 @@ public static class ZineIOSBuild
             throw new InvalidOperationException("iOS export must be inside this project's Builds directory.");
 
         Configure();
+        ConfigureProductionAds();
 
         string[] scenes = EditorBuildSettings.scenes.Where(s => s.enabled).Select(s => s.path).ToArray();
         if (scenes.Length == 0) throw new InvalidOperationException("No enabled game scene.");
@@ -36,7 +38,7 @@ public static class ZineIOSBuild
         string app = project.GetUnityMainTargetGuid();
         string framework = project.GetUnityFrameworkTargetGuid();
         project.SetBuildProperty(app, "CODE_SIGN_STYLE", "Manual");
-        project.SetBuildProperty(app, "PROVISIONING_PROFILE_SPECIFIER", "Zine3D-AppStore");
+        project.SetBuildProperty(app, "PROVISIONING_PROFILE_SPECIFIER", "HSVJine-AppStore");
         project.SetBuildProperty(app, "CODE_SIGN_IDENTITY", "Apple Distribution");
         project.SetBuildProperty(framework, "CODE_SIGN_STYLE", "Manual");
         project.SetBuildProperty(framework, "PROVISIONING_PROFILE_SPECIFIER", "");
@@ -68,6 +70,10 @@ public static class ZineIOSBuild
         string plistPath = Path.Combine(output, "Info.plist");
         plist.ReadFromFile(plistPath);
         plist.root.SetBoolean("ITSAppUsesNonExemptEncryption", false);
+        plist.root.SetString("CFBundleDevelopmentRegion", "ko");
+        PlistElementArray localizations = plist.root.CreateArray("CFBundleLocalizations");
+        localizations.AddString("ko");
+        localizations.AddString("en");
         plist.WriteToFile(plistPath);
         File.WriteAllText(Path.Combine(output, "ZINE_EXPORT.json"), JsonUtility.ToJson(new ExportInfo
         {
@@ -82,7 +88,7 @@ public static class ZineIOSBuild
     public static void Configure()
     {
         PlayerSettings.productName = "지네";
-        PlayerSettings.bundleVersion = "2.4.0";
+        PlayerSettings.bundleVersion = Environment.GetEnvironmentVariable("ZINE_IOS_VERSION") ?? "2.4.1";
         PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.iOS, BundleId);
         PlayerSettings.SetScriptingBackend(NamedBuildTarget.iOS, ScriptingImplementation.IL2CPP);
         PlayerSettings.SetManagedStrippingLevel(NamedBuildTarget.iOS, ManagedStrippingLevel.Low);
@@ -131,6 +137,70 @@ public static class ZineIOSBuild
         }
 
         AssetDatabase.SaveAssets();
+    }
+
+
+    private static void ConfigureProductionAds()
+    {
+        string appId = (Environment.GetEnvironmentVariable("ZINE_ADMOB_IOS_APP_ID") ?? string.Empty).Trim();
+        string interstitialId = (Environment.GetEnvironmentVariable("ZINE_ADMOB_IOS_INTERSTITIAL_ID") ?? string.Empty).Trim();
+
+        if (!Regex.IsMatch(appId, @"^ca-app-pub-[0-9]+~[0-9]+$"))
+            throw new InvalidOperationException("ZINE_ADMOB_IOS_APP_ID is missing or invalid.");
+        if (!Regex.IsMatch(interstitialId, @"^ca-app-pub-[0-9]+/[0-9]+$"))
+            throw new InvalidOperationException("ZINE_ADMOB_IOS_INTERSTITIAL_ID is missing or invalid.");
+
+        string appPublisher = appId.Substring("ca-app-pub-".Length).Split('~')[0];
+        string unitPublisher = interstitialId.Substring("ca-app-pub-".Length).Split('/')[0];
+        if (appPublisher != unitPublisher)
+            throw new InvalidOperationException("AdMob app and interstitial IDs must use the same publisher.");
+        bool allowTestAds = Environment.GetEnvironmentVariable("ZINE_ALLOW_TEST_ADS") == "1";
+        if (appPublisher == "3940256099942544" && !allowTestAds)
+            throw new InvalidOperationException("Google sample AdMob IDs cannot be used for App Store export.");
+
+        const string runtimeDir = "Assets/Resources";
+        const string runtimePath = runtimeDir + "/ZineAdConfig.asset";
+        if (!AssetDatabase.IsValidFolder(runtimeDir))
+            AssetDatabase.CreateFolder("Assets", "Resources");
+
+        ZineAdConfig runtime = AssetDatabase.LoadAssetAtPath<ZineAdConfig>(runtimePath);
+        if (runtime == null)
+        {
+            runtime = ScriptableObject.CreateInstance<ZineAdConfig>();
+            AssetDatabase.CreateAsset(runtime, runtimePath);
+        }
+        runtime.iosInterstitialId = interstitialId;
+        EditorUtility.SetDirty(runtime);
+
+        Type settingsType = AppDomain.CurrentDomain.GetAssemblies()
+            .Select(a => a.GetType("GoogleMobileAds.Editor.GoogleMobileAdsSettings", false))
+            .FirstOrDefault(t => t != null);
+        if (settingsType == null)
+            throw new InvalidOperationException("Google Mobile Ads Unity plugin is not installed.");
+
+        const string settingsDir = "Assets/GoogleMobileAds/Resources";
+        const string settingsPath = settingsDir + "/GoogleMobileAdsSettings.asset";
+        if (!AssetDatabase.IsValidFolder(settingsDir))
+            AssetDatabase.CreateFolder("Assets/GoogleMobileAds", "Resources");
+
+        ScriptableObject settings = AssetDatabase.LoadAssetAtPath<ScriptableObject>(settingsPath);
+        if (settings == null)
+        {
+            settings = ScriptableObject.CreateInstance(settingsType);
+            AssetDatabase.CreateAsset(settings, settingsPath);
+        }
+
+        SerializedObject serialized = new SerializedObject(settings);
+        SerializedProperty iosId = serialized.FindProperty("adMobIOSAppId");
+        if (iosId == null)
+            throw new InvalidOperationException("Google Mobile Ads settings schema changed: adMobIOSAppId missing.");
+        iosId.stringValue = appId;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        EditorUtility.SetDirty(settings);
+
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+        Debug.Log("Configured production AdMob for Zine iOS publisher " + appPublisher + ".");
     }
 
     [Serializable]

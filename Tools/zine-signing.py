@@ -2,8 +2,8 @@
 """Prepare Zine-only provisioning using existing runner credentials in place."""
 import base64,json,os,plistlib,subprocess,tempfile,time,urllib.request,urllib.parse,urllib.error
 from pathlib import Path
-BUNDLE_ID="com.ghtnql.zine3d"
-PROFILE_NAME="Zine3D-AppStore"
+BUNDLE_ID="com.HSV.Jine"
+PROFILE_NAME="HSVJine-AppStore"
 def _b64(data):
     return base64.urlsafe_b64encode(data).rstrip(b"=")
 
@@ -85,8 +85,22 @@ def main():
     cert_ids=[c["id"] for c in certs if base64.b64decode(c["attributes"]["certificateContent"]) in decoded["DeveloperCertificates"]]
     if not cert_ids:raise RuntimeError("Existing signing certificate not found in Apple API")
     bundles=api("bundleIds?"+urllib.parse.urlencode({"filter[identifier]":BUNDLE_ID,"limit":200}))["data"]
-    if len(bundles)!=1:raise RuntimeError("Zine bundle identifier missing or ambiguous")
-    bundle=bundles[0]
+    if len(bundles) > 1:
+        raise RuntimeError("Zine bundle identifier is ambiguous")
+    if not bundles:
+        bundle = api("bundleIds", {
+            "data": {
+                "type": "bundleIds",
+                "attributes": {
+                    "identifier": BUNDLE_ID,
+                    "name": "Zine",
+                    "platform": "IOS"
+                }
+            }
+        })["data"]
+        print("Created Apple bundle identifier", BUNDLE_ID)
+    else:
+        bundle=bundles[0]
     profiles=api("profiles?limit=200")["data"]
     profile=None
     for candidate in profiles:
@@ -109,5 +123,26 @@ def main():
     Path(os.environ["RUNNER_TEMP"],"ZineExportOptions.plist").write_bytes(plistlib.dumps(options))
     with open(os.environ["GITHUB_ENV"],"a") as f:
         f.write("ZINE_PROFILE_UUID="+profile["attributes"]["uuid"]+"\nZINE_BUILD_NUMBER="+str(build)+"\nZINE_APP_ID="+app_id+"\n")
-    print(json.dumps({"bundleId":BUNDLE_ID,"appRecordExists":bool(app_id),"build":build,"profileName":PROFILE_NAME,"profileUUID":profile["attributes"]["uuid"]}))
+    state={"bundleId":BUNDLE_ID,"appRecordExists":bool(app_id),"build":build,"profileName":PROFILE_NAME,"profileUUID":profile["attributes"]["uuid"]}
+    if app_id:
+        state["app"]=apps[0]
+        state["versions"]=api("apps/"+app_id+"/appStoreVersions?limit=50").get("data",[])
+        state["appInfos"]=api("apps/"+app_id+"/appInfos?limit=20").get("data",[])
+        state["builds"]=api("builds?"+urllib.parse.urlencode({"filter[app]":app_id,"sort":"-uploadedDate","limit":10})).get("data",[])
+        for v in state["versions"]:
+            vid=v["id"]
+            v["localizations"]=api("appStoreVersions/"+vid+"/appStoreVersionLocalizations?limit=50").get("data",[])
+            try:v["reviewDetail"]=api("appStoreVersions/"+vid+"/appStoreReviewDetail").get("data")
+            except Exception as e:v["reviewDetailError"]=str(e)
+            try:v["buildRelation"]=api("appStoreVersions/"+vid+"/build").get("data")
+            except Exception as e:v["buildRelationError"]=str(e)
+        for i in state["appInfos"]:
+            iid=i["id"]
+            try:i["ageRatingDeclaration"]=api("appInfos/"+iid+"/ageRatingDeclaration").get("data")
+            except Exception as e:i["ageRatingError"]=str(e)
+            try:i["localizations"]=api("appInfos/"+iid+"/appInfoLocalizations?limit=50").get("data",[])
+            except Exception as e:i["localizationsError"]=str(e)
+    state_path=Path(os.environ["RUNNER_TEMP"])/"zine-store-state.json"
+    state_path.write_text(json.dumps(state,indent=2,default=str))
+    print("ZINE_STORE_STATE "+json.dumps(state,ensure_ascii=False,default=str))
 if __name__=="__main__":main()

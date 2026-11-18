@@ -51,9 +51,10 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
     private Font font;
     private float RowHeight = 34f;
     private const float RowHeightPoints = 34f;
-    private const float RowHeightCompactPoints = 29f;
+    private const float RowHeightCompactPoints = 26f;
+    private string lastStatusText = string.Empty;
     private static readonly float[] ColumnEdges = new float[] { 0f, 0.17f, 0.62f, 0.79f, 1f };
-    private static readonly string[] HeaderLabels = new string[] { "순위", "닉네임", "코인", "시간" };
+    private static string[] HeaderLabels => ZineLocale.IsKorean ? new[] { "순위", "닉네임", "코인", "시간" } : new[] { "Rank", "Nickname", "Coins", "Time" };
     private Text[] headerCells;
     private readonly System.Collections.Generic.List<GameObject> rowObjects = new System.Collections.Generic.List<GameObject>();
     private bool pausedGame;
@@ -108,6 +109,7 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         if (instance != null && instance.openButton != null)
         {
             instance.openButton.interactable = enabled;
+            instance.openButton.gameObject.SetActive(enabled);
         }
     }
 
@@ -165,7 +167,11 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
     private static float CurrentDensity()
     {
 #if UNITY_EDITOR
-        return 1f;
+        // Verification-only override; real devices retain their DPI-based behavior.
+        float verificationDensity;
+        return float.TryParse(Environment.GetEnvironmentVariable("ZINE_VERIFY_DENSITY"),
+            System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture,
+            out verificationDensity) ? Mathf.Clamp(verificationDensity, 1f, 4f) : 1f;
 #else
         float dpi = Screen.dpi;
         if (dpi <= 0f) return 1f;
@@ -200,10 +206,14 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         rootSafeRect = rootSafe.GetComponent<RectTransform>();
         ApplySafeArea(rootSafeRect);
 
-        openButton = MakeButton(rootSafe.transform, "랭킹", new Color(0.07f, 0.17f, 0.10f, 0.96f), Open, false);
-        SetRect(openButton.GetComponent<RectTransform>(), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
-            new Vector2(0f, 24f), new Vector2(230f, 82f), new Vector2(0.5f, 0f));
+        openButton = MakeButton(rootSafe.transform, ZineLocale.T("랭킹", "Ranking"), new Color(0.07f, 0.17f, 0.10f, 0.96f), Open, true);
+        StyleWebPanel(openButton.gameObject, new Color(0.07f, 0.17f, 0.10f, 0.96f),
+            new Color(184f / 255f, 1f, 87f / 255f, 0.35f), 21f);
+        SetRect(openButton.GetComponent<RectTransform>(), new Vector2(1f, 1f), new Vector2(1f, 1f),
+            new Vector2(-16f, -16f), new Vector2(150f, 44f), new Vector2(1f, 1f));
+        AddTrophyIcon(openButton.transform);
         openButton.interactable = requestedEnabled;
+        openButton.gameObject.SetActive(requestedEnabled);
 
         modal = MakePanel(root, "LeaderboardModal", new Color(1f / 255f, 7f / 255f, 4f / 255f, 0.78f));
         Stretch(modal.GetComponent<RectTransform>());
@@ -223,21 +233,21 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         Color lime = new Color(184f / 255f, 1f, 87f / 255f);
         kickerText = MakeText(card.transform, "ZINE3D", 11, TextAnchor.MiddleLeft, lime);
         kickerText.fontStyle = FontStyle.Bold;
-        titleText = MakeText(card.transform, "명예의 전당", 26, TextAnchor.MiddleLeft, body);
+        titleText = MakeText(card.transform, ZineLocale.T("명예의 전당", "Hall of Fame"), 26, TextAnchor.MiddleLeft, body);
         titleText.fontStyle = FontStyle.Bold;
         titleText.verticalOverflow = VerticalWrapMode.Overflow;
         closeButton = MakeButton(card.transform, "×", Color.clear, Close, true, 26);
         runText = MakeText(card.transform, string.Empty, 12, TextAnchor.MiddleLeft, new Color(1f, 0.98f, 0.82f));
         localBestText = MakeText(card.transform, string.Empty, 11, TextAnchor.MiddleLeft, muted);
-        nicknameLabel = MakeText(card.transform, "내 닉네임", 12, TextAnchor.MiddleLeft, muted);
+        nicknameLabel = MakeText(card.transform, ZineLocale.T("내 닉네임", "My nickname"), 12, TextAnchor.MiddleLeft, muted);
         nicknameInput = MakeInput(card.transform);
         nicknameInput.text = ZineLeaderboardClient.Nickname;
         nicknameBeforeEdit = nicknameInput.text;
         nicknameInput.onEndEdit.AddListener(OnNicknameEndEdit);
-        saveButton = MakeButton(card.transform, "저장", lime, SaveNickname, true, 13,
+        saveButton = MakeButton(card.transform, ZineLocale.T("저장", "Save"), lime, SaveNickname, true, 13,
             new Color(19f / 255f, 32f / 255f, 7f / 255f), true);
         StyleWebPanel(saveButton.gameObject, lime, Color.clear, 11f);
-        cancelButton = MakeButton(card.transform, "취소", Color.clear, CancelNicknameEdit, true, 12);
+        cancelButton = MakeButton(card.transform, ZineLocale.T("취소", "Cancel"), Color.clear, CancelNicknameEdit, true, 12);
         statusText = MakeText(card.transform, string.Empty, 12, TextAnchor.MiddleLeft, muted);
         headingText = MakeText(card.transform, string.Empty, 11, TextAnchor.MiddleLeft,
             new Color(body.r, body.g, body.b, 0.56f));
@@ -266,7 +276,7 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         rowsContent.anchoredPosition = Vector2.zero;
         rowsContent.sizeDelta = new Vector2(0f, 0f);
 
-        rowsText = MakeText(rowsContent.transform, "랭킹을 불러오는 중…", 27, TextAnchor.UpperLeft, Color.white);
+        rowsText = MakeText(rowsContent.transform, ZineLocale.T("랭킹을 불러오는 중…", "Loading ranking…"), 27, TextAnchor.UpperLeft, Color.white);
         rowsText.horizontalOverflow = HorizontalWrapMode.Wrap;
         rowsText.verticalOverflow = VerticalWrapMode.Overflow;
         rowsText.rectTransform.anchorMin = new Vector2(0f, 1f);
@@ -287,21 +297,21 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         scroll.scrollSensitivity = 28f;
 
         participationText = MakeText(card.transform,
-            "저장하면 닉네임과 최고 코인·시간이 공개됩니다. 오프라인 플레이도 가능합니다.",
+            ZineLocale.T("저장하면 닉네임과 최고 코인·시간이 공개됩니다. 오프라인 플레이도 가능합니다.", "Saving makes your nickname and best coin/time public. Offline play is also available."),
             11, TextAnchor.MiddleLeft, new Color(0.80f, 0.90f, 0.82f));
-        privacyButton = MakeButton(card.transform, "개인정보 처리방침", new Color(0.18f, 0.25f, 0.20f),
+        privacyButton = MakeButton(card.transform, ZineLocale.T("개인정보 처리방침", "Privacy Policy"), new Color(0.18f, 0.25f, 0.20f),
             () => Application.OpenURL("https://ghtnql.github.io/Zine3D/privacy-policy.html"));
-        deleteButton = MakeButton(card.transform, "랭킹 등록 삭제", new Color(0.35f, 0.15f, 0.13f), RequestDeletion);
+        deleteButton = MakeButton(card.transform, ZineLocale.T("랭킹 등록 삭제", "Delete ranking entry"), new Color(0.35f, 0.15f, 0.13f), RequestDeletion);
         deletionConfirmation = MakePanel(card.transform, "DeleteConfirmation", new Color(0.025f, 0.055f, 0.035f, 1f));
         Stretch(deletionConfirmation.GetComponent<RectTransform>());
         Text deletionText = MakeText(deletionConfirmation.transform,
-            "공개 랭킹의 닉네임과 기록을 삭제할까요?\n기기에 저장된 최고기록은 유지됩니다.", 30, TextAnchor.MiddleCenter, Color.white);
+            ZineLocale.T("공개 랭킹의 닉네임과 기록을 삭제할까요?\n기기에 저장된 최고기록은 유지됩니다.", "Delete your public nickname and score?\nYour local best will remain on this device."), 30, TextAnchor.MiddleCenter, Color.white);
         SetRect(deletionText.rectTransform, new Vector2(0.08f, 0.35f), new Vector2(0.92f, 0.85f),
             Vector2.zero, Vector2.zero, new Vector2(0.5f, 0.5f));
-        Button confirmDeletion = MakeButton(deletionConfirmation.transform, "삭제 확인", new Color(0.45f, 0.18f, 0.14f), ConfirmDeletion);
+        Button confirmDeletion = MakeButton(deletionConfirmation.transform, ZineLocale.T("삭제 확인", "Delete"), new Color(0.45f, 0.18f, 0.14f), ConfirmDeletion);
         SetRect(confirmDeletion.GetComponent<RectTransform>(), new Vector2(0.08f, 0.12f), new Vector2(0.47f, 0.30f),
             Vector2.zero, Vector2.zero, new Vector2(0.5f, 0.5f));
-        Button cancelDeletion = MakeButton(deletionConfirmation.transform, "취소", new Color(0.18f, 0.25f, 0.20f),
+        Button cancelDeletion = MakeButton(deletionConfirmation.transform, ZineLocale.T("취소", "Cancel"), new Color(0.18f, 0.25f, 0.20f),
             () => deletionConfirmation.SetActive(false));
         SetRect(cancelDeletion.GetComponent<RectTransform>(), new Vector2(0.53f, 0.12f), new Vector2(0.92f, 0.30f),
             Vector2.zero, Vector2.zero, new Vector2(0.5f, 0.5f));
@@ -323,7 +333,9 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         // Snake.Update owns Escape; processing it here too can close then quit in one frame.
         float keyboardH = GetKeyboardHeight();
         if (Screen.width != lastScreenW || Screen.height != lastScreenH || Screen.safeArea != lastSafeArea
-            || TouchScreenKeyboard.visible != lastKeyboardVisible || !Mathf.Approximately(keyboardH, lastKeyboardH))
+            || TouchScreenKeyboard.visible != lastKeyboardVisible || !Mathf.Approximately(keyboardH, lastKeyboardH)
+            || !Mathf.Approximately(PointsToCanvasUnits(uiCanvas, CurrentDensity()), pointToCanvas)
+            || (statusText != null && statusText.text != lastStatusText))
         {
             ApplyResponsiveLayout(keyboardH > 0f);
         }
@@ -384,13 +396,13 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         float logicalH = availH / unit;
         bool compact = logicalH < 520f || keyboardOpen;
         float padX = compact ? 16f : 20f;
-        float padY = compact ? 13f : 20f;
-        float width = Mathf.Max(1f, Mathf.Min(620f, availW / unit * 0.94f));
+        float padY = compact ? 6f : 20f;
+        float width = Mathf.Max(1f, Mathf.Min(compact ? 760f : 620f, availW / unit - 12f));
         float height = Mathf.Max(1f, Mathf.Min(keyboardOpen ? 172f : gameOverShown ? 640f : 608f,
-            Mathf.Min(720f, logicalH * 0.92f)));
+            compact ? logicalH - 8f : logicalH * 0.92f));
         card.sizeDelta = new Vector2(width * unit, height * unit);
         float innerW = Mathf.Max(1f, width - padX * 2f);
-        RowHeight = (compact ? RowHeightCompactPoints : RowHeightPoints) * unit;
+        RowHeight = (compact ? (logicalH < 360f ? RowHeightCompactPoints : 29f) : RowHeightPoints) * unit;
 
         // Dimensions are logical points, mapped once to Canvas units. Short screens
         // scroll the table rather than shrinking body text and touch controls.
@@ -423,34 +435,65 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
             text.rectTransform.offsetMax = new Vector2(-12f * unit, 0f);
         }
 
-        bool showKicker = !keyboardOpen || height >= 150f;
+        // Compact landscape uses a single title/run line and a short best-score
+        // line. Every control keeps its point size; recovered space goes to rows.
+        bool showKicker = !compact;
         kickerText.gameObject.SetActive(showKicker);
-        PlacePoints(kickerText.rectTransform, padX, padY, innerW - 54f, 14f);
-        PlacePoints(titleText.rectTransform, padX, padY + (showKicker ? 16f : 0f), innerW - 54f, compact ? 26f : 32f);
+        PlacePoints(kickerText.rectTransform, padX, padY, innerW - 44f, 14f);
+        float titleY = padY + (showKicker ? 16f : 0f);
+        float titleH = compact ? 24f : 32f;
+        float titleW = compact && !keyboardOpen ? Mathf.Min(190f, innerW * 0.35f) : innerW - 44f;
+        PlacePoints(titleText.rectTransform, padX, titleY, titleW, titleH);
         PlacePoints(closeButton.GetComponent<RectTransform>(), width - padX - 38f, padY, 38f, 38f);
-        float top = padY + (keyboardOpen && !showKicker ? 30f : compact ? 44f : 50f) + (compact ? 8f : 14f);
+        float top = titleY + (compact ? 40f : titleH);
         runText.gameObject.SetActive(!keyboardOpen && gameOverShown);
         if (!keyboardOpen && gameOverShown)
         {
-            PlacePoints(runText.rectTransform, padX, top, innerW, 24f);
-            top += 32f;
+            if (compact)
+                PlacePoints(runText.rectTransform, padX + titleW + 8f, titleY,
+                    Mathf.Max(1f, innerW - titleW - 52f), titleH);
+            else
+            {
+                PlacePoints(runText.rectTransform, padX, top, innerW, 24f);
+                top += 28f;
+            }
+        }
+        // Put best/current-run metadata beside the title in landscape, reserving
+        // the vertical space for scores even while a loading/status line is shown.
+        localBestText.gameObject.SetActive(!keyboardOpen && !(compact && gameOverShown));
+        if (!keyboardOpen && !gameOverShown && compact)
+            PlacePoints(localBestText.rectTransform, padX + titleW + 8f, titleY,
+                Mathf.Max(1f, innerW - titleW - 52f), titleH);
+        else if (!keyboardOpen && !compact)
+        {
+            PlacePoints(localBestText.rectTransform, padX, top, innerW - 44f, 20f);
+            top += 24f;
         }
         nicknameLabel.gameObject.SetActive(!compact);
         if (!compact)
         {
             PlacePoints(nicknameLabel.rectTransform, padX, top, innerW, 16f);
-            top += 22f;
+            top += 20f;
         }
         float saveW = 64f;
-        float cancelW = 52f;
+        float cancelW = 60f;
         float inputW = Mathf.Max(1f, innerW - saveW - cancelW - 16f);
         PlacePoints(nicknameInput.GetComponent<RectTransform>(), padX, top, inputW, 42f);
         PlacePoints(saveButton.GetComponent<RectTransform>(), padX + inputW + 8f, top, saveW, 42f);
         PlacePoints(cancelButton.GetComponent<RectTransform>(), padX + inputW + saveW + 16f, top, cancelW, 42f);
-        top += 42f + (compact ? 5f : 8f);
-        PlacePoints(statusText.rectTransform, padX, top, innerW, 20f);
-        top += 20f + (compact ? 5f : 8f);
-        localBestText.gameObject.SetActive(!keyboardOpen);
+        top += 42f + (compact ? 4f : 8f);
+        lastStatusText = statusText.text;
+        bool hasStatus = !string.IsNullOrEmpty(lastStatusText);
+        statusText.gameObject.SetActive(hasStatus);
+        if (hasStatus)
+        {
+            // Preserve longer error/confirmation messages; an empty status consumes
+            // no space. Usual loading/sync messages fit one line in landscape.
+            PlacePoints(statusText.rectTransform, padX, top, innerW, 18f);
+            float statusH = Mathf.Max(18f, statusText.preferredHeight / unit + 2f);
+            PlacePoints(statusText.rectTransform, padX, top, innerW, statusH);
+            top += statusH;
+        }
         headingText.gameObject.SetActive(!keyboardOpen);
         rowsScrollRect.gameObject.SetActive(!keyboardOpen);
         participationText.gameObject.SetActive(!keyboardOpen);
@@ -459,22 +502,80 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         deleteButton.interactable = ZineLeaderboardClient.HasPlayer;
         if (!keyboardOpen)
         {
-            float footerHeight = compact ? 85f : 94f;
+            float disclosureH = compact ? 22f : 36f;
+            // Calculate disclosure height with its actual width so portrait / long
+            // localizations remain readable instead of overlapping the buttons.
+            PlacePoints(participationText.rectTransform, padX, 0f, innerW, disclosureH);
+            disclosureH = Mathf.Max(disclosureH, participationText.preferredHeight / unit + 2f);
+            float footerHeight = disclosureH + (compact ? 30f : 36f);
             float footerTop = height - padY - footerHeight;
-            PlacePoints(headingText.rectTransform, padX, top, innerW, compact ? 26f : 30f);
-            top += compact ? 26f : 30f;
-            PlacePoints(rowsScrollRect, padX, top, innerW, Mathf.Max(1f, footerTop - top - 8f));
-            PlacePoints(localBestText.rectTransform, padX, footerTop, innerW, 18f);
-            PlacePoints(participationText.rectTransform, padX, footerTop + 20f, innerW, compact ? 28f : 36f);
-            float footerButtonTop = height - padY - 30f;
+            float headerH = compact ? 20f : 30f;
+            PlacePoints(headingText.rectTransform, padX, top, innerW, headerH);
+            top += headerH;
+            PlacePoints(rowsScrollRect, padX, top, innerW, Mathf.Max(1f, footerTop - top));
+            PlacePoints(participationText.rectTransform, padX, footerTop, innerW, disclosureH);
             float footerButtonW = (innerW - 8f) * 0.5f;
-            PlacePoints(privacyButton.GetComponent<RectTransform>(), padX, footerButtonTop, footerButtonW, 30f);
-            PlacePoints(deleteButton.GetComponent<RectTransform>(), padX + footerButtonW + 8f, footerButtonTop, footerButtonW, 30f);
+            PlacePoints(privacyButton.GetComponent<RectTransform>(), padX, footerTop + disclosureH, footerButtonW, compact ? 30f : 36f);
+            PlacePoints(deleteButton.GetComponent<RectTransform>(), padX + footerButtonW + 8f, footerTop + disclosureH, footerButtonW, compact ? 30f : 36f);
         }
-        SetRect(openButton.GetComponent<RectTransform>(), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
-            new Vector2(0f, 18f * unit), new Vector2(128f * unit, 42f * unit), new Vector2(0.5f, 0f));
+        SetRect(openButton.GetComponent<RectTransform>(), new Vector2(1f, 1f), new Vector2(1f, 1f),
+            new Vector2(-16f * unit, -16f * unit), new Vector2(150f * unit, 44f * unit), new Vector2(1f, 1f));
+        ZineWebPanel openPanel = openButton.GetComponent<ZineWebPanel>();
+        if (openPanel != null)
+        {
+            openPanel.Radius = 22f * unit;
+            openPanel.BorderWidth = unit;
+            openPanel.SetVerticesDirty();
+        }
+        LayoutTrophyIcon(unit);
         SetButtonFontPoints(openButton, 15f);
         ResizeRows();
+    }
+
+    private void AddTrophyIcon(Transform parent)
+    {
+        GameObject trophy = new GameObject("TrophyIcon", typeof(RectTransform));
+        trophy.transform.SetParent(parent, false);
+        Color gold = new Color(1f, 0.84f, 0.28f);
+        // A stepped cup, open handles, stem and foot read clearly at 22 points.
+        AddTrophyPart(trophy.transform, "CupRim", 4f, 2f, 14f, 3f, gold);
+        AddTrophyPart(trophy.transform, "Cup", 5f, 5f, 12f, 7f, gold);
+        AddTrophyPart(trophy.transform, "CupBase", 7f, 12f, 8f, 3f, gold);
+        AddTrophyPart(trophy.transform, "LeftTop", 1f, 4f, 4f, 2f, gold);
+        AddTrophyPart(trophy.transform, "LeftSide", 1f, 5f, 2f, 5f, gold);
+        AddTrophyPart(trophy.transform, "LeftBottom", 2f, 9f, 4f, 2f, gold);
+        AddTrophyPart(trophy.transform, "RightTop", 17f, 4f, 4f, 2f, gold);
+        AddTrophyPart(trophy.transform, "RightSide", 19f, 5f, 2f, 5f, gold);
+        AddTrophyPart(trophy.transform, "RightBottom", 16f, 9f, 4f, 2f, gold);
+        AddTrophyPart(trophy.transform, "Stem", 9f, 14f, 4f, 5f, gold);
+        AddTrophyPart(trophy.transform, "Foot", 6f, 19f, 10f, 2f, gold);
+    }
+
+    private void AddTrophyPart(Transform parent, string name, float x, float y, float w, float h, Color color)
+    {
+        GameObject part = new GameObject(name, typeof(RectTransform), typeof(Image));
+        part.transform.SetParent(parent, false);
+        Image image = part.GetComponent<Image>();
+        image.color = color;
+        image.raycastTarget = false;
+        // Unit coordinates live under a uniformly scaled 22-point icon container.
+        Place(part.GetComponent<RectTransform>(), x, y, w, h);
+    }
+
+    private void LayoutTrophyIcon(float unit)
+    {
+        Transform trophy = openButton.transform.Find("TrophyIcon");
+        if (trophy == null) return;
+        RectTransform rect = trophy.GetComponent<RectTransform>();
+        Place(rect, 17f * unit, 11f * unit, 22f, 22f);
+        rect.localScale = new Vector3(unit, unit, 1f);
+        Text label = openButton.GetComponentInChildren<Text>(true);
+        if (label != null)
+        {
+            Stretch(label.rectTransform);
+            label.rectTransform.offsetMin = new Vector2(38f * unit, 0f);
+            label.rectTransform.offsetMax = new Vector2(-8f * unit, 0f);
+        }
     }
 
     private void PlacePoints(RectTransform rect, float left, float top, float width, float height)
@@ -521,8 +622,8 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         rect.anchorMin = new Vector2(left, 0f);
         rect.anchorMax = new Vector2(right, 1f);
         rect.pivot = new Vector2(0f, 0.5f);
-        rect.offsetMin = new Vector2(10f * pointToCanvas, 5f * pointToCanvas);
-        rect.offsetMax = new Vector2(-4f * pointToCanvas, -5f * pointToCanvas);
+        rect.offsetMin = new Vector2(10f * pointToCanvas, 2f * pointToCanvas);
+        rect.offsetMax = new Vector2(-4f * pointToCanvas, -2f * pointToCanvas);
     }
 
     private Text MakeRowCell(Transform parent, string name, string value, Color color)
@@ -622,6 +723,8 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
 
     private void Open()
     {
+        if (!requestedEnabled) return;
+        if (openButton != null && !openButton.gameObject.activeSelf) return;
         pausedGame = true;
         Snake snake = FindObjectOfType<Snake>();
         if (snake != null)
@@ -650,14 +753,14 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         nicknameInput.text = nicknameBeforeEdit;
         runText.gameObject.SetActive(gameOver);
         runText.text = gameOver
-            ? "이번 기록 · 코인 " + lastBodyCount + " · " + FormatDuration(lastSurvivalMs)
+            ? ZineLocale.T("이번 기록 · 코인 ", "This run · Coins ") + lastBodyCount + " · " + FormatDuration(lastSurvivalMs)
             : string.Empty;
         RefreshLocalText();
         statusText.text = Application.internetReachability == NetworkReachability.NotReachable
-            ? "오프라인입니다. 로컬 최고기록은 기기에 저장됩니다."
-            : "랭킹을 불러오는 중…";
-        ShowRowsStatus("랭킹을 불러오는 중…");
-        ResizeRows();
+            ? ZineLocale.T("오프라인입니다. 로컬 최고기록은 기기에 저장됩니다.", "Offline. Your local best is saved on this device.")
+            : ZineLocale.T("랭킹을 불러오는 중…", "Loading ranking…");
+        ShowRowsStatus(ZineLocale.T("랭킹을 불러오는 중…", "Loading ranking…"));
+        ApplyResponsiveLayout(false);
         rowsScrollRect.GetComponent<ScrollRect>().verticalNormalizedPosition = 1f;
         ZineLeaderboardClient.LoadLeaderboard(10);
         ZineLeaderboardClient.RetryPendingScore();
@@ -686,7 +789,7 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
 
     private void SaveNickname()
     {
-        statusText.text = "닉네임을 저장하는 중…";
+        statusText.text = ZineLocale.T("닉네임을 저장하는 중…", "Saving nickname…");
         string typedNickname = nicknameInput.text;
         DismissKeyboard();
         ZineLeaderboardClient.SaveNickname(typedNickname);
@@ -702,7 +805,7 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         {
             es.SetSelectedGameObject(null);
         }
-        statusText.text = "닉네임 입력을 취소했습니다.";
+        statusText.text = ZineLocale.T("닉네임 입력을 취소했습니다.", "Nickname edit cancelled.");
     }
 
     private void OnNicknameEndEdit(string value)
@@ -741,7 +844,7 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
     private void ConfirmDeletion()
     {
         deletionConfirmation.SetActive(false);
-        statusText.text = "랭킹 등록을 삭제하는 중…";
+        statusText.text = ZineLocale.T("랭킹 등록을 삭제하는 중…", "Deleting ranking entry…");
         ZineLeaderboardClient.DeletePlayer();
     }
 
@@ -751,7 +854,7 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
         nicknameInput.text = string.Empty;
         deleteButton.interactable = false;
         RefreshLocalText();
-        statusText.text = "공개 랭킹 등록을 삭제했습니다. 로컬 최고기록은 유지됩니다.";
+        statusText.text = ZineLocale.T("공개 랭킹 등록을 삭제했습니다. 로컬 최고기록은 유지됩니다.", "Ranking entry deleted. Your local best remains.");
         ZineLeaderboardClient.LoadLeaderboard(10);
     }
 
@@ -764,7 +867,7 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
     {
         nicknameInput.text = nickname;
         nicknameBeforeEdit = nickname;
-        statusText.text = "닉네임을 등록했습니다.";
+        statusText.text = ZineLocale.T("닉네임을 등록했습니다.", "Nickname saved.");
         deleteButton.interactable = true;
         ZineLeaderboardClient.RetryPendingScore();
         ZineLeaderboardClient.LoadLeaderboard(10);
@@ -772,10 +875,10 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
 
     private void OnRequestFailed(string message)
     {
-        statusText.text = string.IsNullOrEmpty(message) ? "랭킹을 불러오지 못했습니다." : message;
+        statusText.text = string.IsNullOrEmpty(message) ? ZineLocale.T("랭킹을 불러오지 못했습니다.", "Could not load ranking.") : message;
         if (ZineLeaderboardClient.CurrentLeaderboard.Length == 0)
         {
-            ShowRowsStatus("랭킹을 불러오지 못했습니다.\n게임은 오프라인에서도 계속할 수 있습니다.");
+            ShowRowsStatus(ZineLocale.T("랭킹을 불러오지 못했습니다.\n게임은 오프라인에서도 계속할 수 있습니다.", "Could not load ranking.\nYou can keep playing offline."));
             ResizeRows();
         }
     }
@@ -784,11 +887,11 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
     {
         if (ZineLeaderboardClient.HasPendingScore && !ZineLeaderboardClient.HasPlayer)
         {
-            statusText.text = "닉네임을 등록하면 로컬 최고기록이 서버 랭킹에 등록됩니다.";
+            statusText.text = ZineLocale.T("닉네임을 등록하면 로컬 최고기록이 서버 랭킹에 등록됩니다.", "Save a nickname to upload your local best to the ranking.");
         }
         else if (ZineLeaderboardClient.HasPendingScore)
         {
-            statusText.text = "로컬 최고기록을 서버와 동기화하는 중입니다.";
+            statusText.text = ZineLocale.T("로컬 최고기록을 서버와 동기화하는 중입니다.", "Syncing your local best with the server.");
         }
         else
         {
@@ -800,7 +903,7 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
 
         if (entries == null || entries.Length == 0)
         {
-            ShowRowsStatus("첫 기록의 주인공이 되어보세요.");
+            ShowRowsStatus(ZineLocale.T("첫 기록의 주인공이 되어보세요.", "Be the first on the leaderboard."));
             ResizeRows();
             return;
         }
@@ -851,8 +954,8 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
     {
         ZineScore best = ZineLeaderboardClient.LocalBest;
         localBestText.text = best.bodyCount <= 0 && best.survivalMs <= 0
-            ? "내 로컬 최고기록 · 아직 없음"
-            : "내 로컬 최고기록 · 코인 " + best.bodyCount + " · " + FormatDuration(best.survivalMs);
+            ? ZineLocale.T("내 로컬 최고기록 · 아직 없음", "My local best · none yet")
+            : ZineLocale.T("내 로컬 최고기록 · 코인 ", "My local best · Coins ") + best.bodyCount + " · " + FormatDuration(best.survivalMs);
     }
 
     private static string FormatDuration(int milliseconds)
@@ -939,7 +1042,7 @@ public sealed class NativeLeaderboardUI : MonoBehaviour
 
         Text value = MakeText(go.transform, string.Empty, 28, TextAnchor.MiddleLeft, Color.white);
         SetRect(value.rectTransform, Vector2.zero, Vector2.one, new Vector2(18f, 0f), new Vector2(-36f, 0f), Vector2.zero);
-        Text placeholder = MakeText(go.transform, "닉네임 2~16자", 28, TextAnchor.MiddleLeft, new Color(1f, 1f, 1f, 0.42f));
+        Text placeholder = MakeText(go.transform, ZineLocale.T("닉네임 2~16자", "Nickname 2–16 chars"), 28, TextAnchor.MiddleLeft, new Color(1f, 1f, 1f, 0.42f));
         Stretch(placeholder.rectTransform);
         placeholder.rectTransform.offsetMin = new Vector2(18f, 0f);
         placeholder.rectTransform.offsetMax = new Vector2(-18f, 0f);

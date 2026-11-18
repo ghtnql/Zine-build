@@ -1,3 +1,17 @@
+# iPhone Korean and compact ranking verification — 2026-11-18
+
+The native ranking entry is a rounded trophy button in the safe-area top right. Starting/resuming play hides and disables its entire GameObject; disabled programmatic clicks do not open the modal. Pause and game-over restore it. CanvasScaler changes trigger layout after initial setup so the first-screen touch target keeps its intended dimensions.
+
+Compact ranking puts best/current-run metadata beside the title and reserves a separate 40-point header for the close control. It uses 13-point table text and 26-point rows below logical safe height360 (29-point rows above). Empty status text consumes no space; disclosure, privacy, delete, cancel and close remain available. The verifier checks close/input non-overlap, five full rows in normal and game-over layouts, input cancellation, scrolling, pause/resume, and the real production GET against all ten captured server entries. Game-over fixtures only format local UI values; they never submit a score.
+
+Korean gameplay labels and ranking text use the existing bundled Korean font; English remains available. The Editor-only `ZINE_VERIFY_LOCALE`/`ZINE_VERIFY_DENSITY` switches allow repeatable language and physical-density rendering. Device behavior continues to use the actual system language and DPI. The export and IPA checker require `CFBundleLocalizations=[ko,en]` and development region `ko`.
+
+Final render profiles: 740×330 at density1, and 2688×1242 at density3 for both Korean and English. The verifier's requested height includes the21-pixel Editor toolbar. High-resolution Linux rendering uses the installed Lavapipe ICD with `-force-vulkan -force-device-index 0`; capture normalizes the graphics backend's texture origin. Original production leaderboard data is read only. Physical iPhone keyboard, audio, background behavior and user installation are not proved by these Editor checks.
+
+Artifacts: `Builds/Verification-Final-ko-740`, `Builds/Verification-Final-ko-2688`, `Builds/Verification-Final-en-2688`; logs `Logs/ios-ui-final-*.log`. Current App Store Connect2.4.1 metadata has Korean and English keywords including `지네,zine,jine`; submission/approval is separate from saving that draft.
+
+---
+
 # Observed release verification — 2026-10-04
 
 Current native ranking uses the SAME production API as the existing web leaderboard: `https://zine3dranking.duckdns.org/api/v1/leaderboard?limit=10`. Existing SQLite database remains `/home/ghtnql/apps/zine-leaderboard/data/leaderboard.db`; 8 players and 8 original scores. No new DB, reset, or record migration. Rank1 is 미래의최우혁2, 94 coins, 04:32. A previous UI screenshot used synthetic 테스트1~10 entries; it did not show actual production records and is superseded by the live verification below.
